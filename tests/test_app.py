@@ -1,9 +1,7 @@
-
 from pathlib import Path
 
 import pandas as pd
 from app.app import load_csv
-
 
 # Locate CSV relative to the project directory
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

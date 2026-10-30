@@ -3,4 +3,5 @@ __pycache__/
 .env
 .DS_Store
 .venv/
+.venv-1/
 .pytest_cache/

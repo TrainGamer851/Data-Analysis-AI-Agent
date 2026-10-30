@@ -9,7 +9,7 @@ from pathlib import Path
 comic_theme = gr.themes.Soft(
     primary_hue="blue",
     secondary_hue="yellow",
-    font=["Comic Sans MS", "Trebuchet MS", "sans-serif"]
+    font=["Comic Sans MS", "Trebuchet MS", "sans-serif"],
 )
 
 comic_css = """
@@ -62,8 +62,6 @@ comic_css = """
 # ----------------------------------
 
 
-from pathlib import Path
-
 def load_csv(file_path):
     if file_path is None:
         return (
@@ -71,7 +69,7 @@ def load_csv(file_path):
             "Please upload a CSV file first.",
             "",
             "",
-            pd.DataFrame()
+            pd.DataFrame(),
         )
 
     try:
@@ -84,7 +82,7 @@ def load_csv(file_path):
                 f"CSV file '{file_name}' is empty.",
                 "",
                 "",
-                pd.DataFrame()
+                pd.DataFrame(),
             )
 
         total_rows = str(df.shape[0])
@@ -95,16 +93,11 @@ def load_csv(file_path):
             "CSV file loaded successfully!",
             total_rows,
             total_columns,
-            df
+            df,
         )
 
     except Exception as error:
-        return (
-            pd.DataFrame(),
-            f"Error loading CSV: {error}",
-            "",
-            ""
-        )
+        return (pd.DataFrame(), f"Error loading CSV: {error}", "", "", pd.DataFrame())
 
 
 # ----------------------------------
@@ -112,54 +105,23 @@ def load_csv(file_path):
 # ----------------------------------
 
 
-def analyze_question(question, df):
-    if df is None or df.empty:
-        return "Please upload a CSV file first.", pd.DataFrame()
+def analyze_question(question, dataframe):
+    if dataframe is None or dataframe.empty:
+        return "Please upload a CSV file first."
 
     if not question or not question.strip():
-        return "Please enter a question.", pd.DataFrame()
+        return "Please enter a question about your dataset."
 
-    question = question.lower().strip()
-
-    if "total sales by category" in question:
-        result = (
-            df.groupby("Category", as_index=False)["Sales"]
-            .sum()
-        )
-        return "Total sales grouped by category:", result
-
-    elif "total sales" in question:
-        total = df["Sales"].sum()
-        return f"Total Sales: ${total:,.2f}", pd.DataFrame()
-
-    elif "average profit" in question:
-        average = df["Profit"].mean()
-        return f"Average Profit: ${average:,.2f}", pd.DataFrame()
-
-    elif "how many orders" in question:
-        if "Order ID" in df.columns:
-            count = df["Order ID"].nunique()
-        else:
-            count = len(df)
-
-        return f"Number of unique orders: {count:,}", pd.DataFrame()
-
-    else:
-        return (
-            "Question not supported yet. "
-            "Try asking about total sales, average profit, "
-            "number of orders, or total sales by category.",
-            pd.DataFrame()
-        )
+    return (
+        f"Question received: {question}\n\n" "AI analysis will be available in Stage 2."
+    )
 
 
 # ----------------------------------
 # Build the Gradio interface
 # ----------------------------------
 
-with gr.Blocks(
-    title="Data Analysis Agent"
-) as demo:
+with gr.Blocks(title="Data Analysis Agent") as demo:
     dataset_state = gr.State(value=None)
 
     gr.Markdown(
@@ -169,7 +131,7 @@ with gr.Blocks(
             <p>Upload your CSV file and explore the data!</p>
         </div>
         """,
-        elem_id="header"
+        elem_id="header",
     )
 
     gr.Markdown(
@@ -182,7 +144,7 @@ with gr.Blocks(
             <p>4. Click "Analyze Data" to get insights from your dataset and question.</p>
         </div>
         """,
-        elem_id="instructions"
+        elem_id="instructions",
     )
 
     gr.Markdown("## 📁 Upload Your Dataset")
@@ -190,81 +152,47 @@ with gr.Blocks(
     with gr.Group(elem_id="upload-section"):
 
         csv_file = gr.File(
-            label="Upload CSV File",
-            file_types=[".csv"],
-            type="filepath"
+            label="Upload CSV File", file_types=[".csv"], type="filepath"
         )
 
-        load_button = gr.Button(
-            "🚀 Load Dataset",
-            variant="primary"
-        )
+        load_button = gr.Button("🚀 Load Dataset", variant="primary")
 
-    status = gr.Textbox(
-        label="Status",
-        interactive=False
-    )
+    status = gr.Textbox(label="Status", interactive=False)
 
     gr.Markdown("## 📈 Dataset Overview")
 
     with gr.Row():
-        row_count = gr.Textbox(
-            label="Total Rows",
-            interactive=False
-        )
+        row_count = gr.Textbox(label="Total Rows", interactive=False)
 
-        column_count = gr.Textbox(
-            label="Total Columns",
-            interactive=False
-        )
+        column_count = gr.Textbox(label="Total Columns", interactive=False)
 
     gr.Markdown("## 🔍 Dataset Preview")
 
-    dataset_table = gr.Dataframe(
-        label="CSV Data (First 100 Rows)",
-        interactive=False
-    )
+    dataset_table = gr.Dataframe(label="CSV Data (First 100 Rows)", interactive=False)
 
     # Connect button to CSV loading function
     load_button.click(
         fn=load_csv,
         inputs=[csv_file],
-        outputs=[
-            dataset_table,
-            status,
-            row_count,
-            column_count,
-            dataset_state
-        ]
+        outputs=[dataset_table, status, row_count, column_count, dataset_state],
     )
 
     gr.Markdown("## 💬 Ask Questions About Your Dataset")
 
     question_input = gr.Textbox(
-        label="Your Question",
-        placeholder="Example: What is the total sales?",
-        lines=2
+        label="Your Question", placeholder="Example: What is the total sales?", lines=2
     )
 
-    analyze_button = gr.Button(
-        "⚡ Analyze Data",
-        variant="primary"
-    )
+    analyze_button = gr.Button("⚡ Analyze Data", variant="primary")
 
-    analysis_output = gr.Textbox(
-        label="Analysis Answer",
-        interactive=False
-    )
+    analysis_output = gr.Textbox(label="Analysis Answer", interactive=False)
 
-    analysis_table = gr.Dataframe(
-        label="Analysis Results",
-        interactive=False
-    )
+    analysis_table = gr.Dataframe(label="Analysis Results", interactive=False)
 
     analyze_button.click(
         fn=analyze_question,
         inputs=[question_input, dataset_state],
-        outputs=[analysis_output, analysis_table]
+        outputs=[analysis_output],
     )
 
 # ----------------------------------
@@ -272,7 +200,4 @@ with gr.Blocks(
 # ----------------------------------
 
 if __name__ == "__main__":
-    demo.launch(
-        theme=comic_theme,
-        css=comic_css
-    )
+    demo.launch(theme=comic_theme, css=comic_css)
