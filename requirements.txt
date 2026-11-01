@@ -1,0 +1,20 @@
+# Data Analysis AI Agent:
+
+# Usage guide
+# Install with this:  pip install -r requirements.txt
+
+# UI (app/app.py) 
+gradio >= 6.0,<7
+
+# Data analysis (execution_env.py, prompts.py)
+pandas>=2.2,<4        # tested on 3.0.2
+numpy>=1.26,<3        # tested on 2.4.4
+
+# LLM client (llm_client.py)
+openai >= 1.40          # OpenAI-compatible client used for NRP and Ollama
+python-dotenv >= 1.0    # loads NRP_API_KEY etc. from .env
+
+# Agent loop (agent_runner.py)
+
+# Tests
+pytest >= 8.0

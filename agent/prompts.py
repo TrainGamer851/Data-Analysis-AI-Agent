@@ -39,13 +39,21 @@ available columns before applying a formula.
 
 CODE GENERATION RULES:
 1. Generate Python/pandas code.
-2. Assume the DataFrame is named df.
+2. Return only Python code without Markdown fences.
 3. Store the final calculated answer in a variable named result.
-4. Return only Python code without Markdown fences.
-5. Do not modify df in place.
-6. Do not access the internet, external files, secrets,
-   environment variables, or shell commands.
-7. Do not execute code yourself.
+4. Do not modify df in place.
+5. Do not execute code yourself.
+
+EXECUTION ENVIRONMENT:
+- df (the dataset), pd (pandas) and np (numpy) are already available.
+- Imports are limited to pandas, numpy, math, datetime and re.
+- There is no file, network or shell access, so do not try to
+  read files, call URLs, or use environment variables.
+- result may be a scalar, string, dict, Series or DataFrame.
+- Keep result small: round numbers and use at most 200 rows.
+- Use print() for debugging only. The answer must be in result.
+- If a date column has dtype object, convert it first with
+  pd.to_datetime(df["column"], errors="coerce").
 """
 
 # Prompt for generating business recommendations based on dataset evidence and external research.
