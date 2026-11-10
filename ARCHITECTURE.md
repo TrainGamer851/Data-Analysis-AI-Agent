@@ -72,6 +72,9 @@ coordinating interactions between the LLM and tools.
     |   |-- prompts.py
     |   |-- agent_runner.py
     |   |-- execution_env.py
+    |   |-- sandbox_worker.py
+    |-- docker/
+    |   |-- Dockerfile
     |
     |-- data/
     |   |-- superstore_orders.csv
@@ -190,7 +193,10 @@ not recreate the entire mini-swe-agent framework.
 
 Files:
 - agent/execution_env.py
+- agent/sandbox_worker.py
+- docker/Dockerfile
 - tests/test_execution_env.py
+- tests/test_docker_sandbox.py
 
 Responsibilities:
 
