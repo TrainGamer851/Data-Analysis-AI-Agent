@@ -92,7 +92,7 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
     with tempfile.TemporaryDirectory() as workdir: #Make a "fake" ttemp cwd to run
         try:
             proc = subprocess.run(
-                [sys.executable, "-I", os.path.abspath(__file__)],
+                [sys.executable, "-I", _WORKER],
                 input=payload, capture_output=True, env=env, cwd=workdir,
                 timeout=timeout + STARTUP_GRACE,
             )
