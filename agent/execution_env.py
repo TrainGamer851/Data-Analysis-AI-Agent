@@ -11,7 +11,7 @@ The SANDBOX_BACKEND environment variable picks where the worker runs:
         using purely subprocess isolation and restrictions:
             a fresh `python -I` subprocess with an empty environment.
             Defense in depth, NOT a true sandbox. (Using mainly for testing development.)
-    docker (new)
+    docker (new - required installation of Docker Desktop)
         Same worker in an additional layer - locked-down container:
             no network, read-only filesystem, non-root, dropped capabilities, memory/CPU/process limits.
         The image is built automatically on first use.
@@ -19,6 +19,7 @@ The SANDBOX_BACKEND environment variable picks where the worker runs:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import pickle
@@ -26,13 +27,20 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
+from importlib.metadata import version
 
 import pandas as pd
 
 STARTUP_GRACE = 10  # extra seconds for interpreter + pandas startup
 MAX_ROWS = 200
 
-_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sandbox_worker.py")
+IMAGE = "data-agent-sandbox"
+ 
+_CURR = os.path.dirname(os.path.abspath(__file__))
+_WORKER = os.path.join(_CURR, "sandbox_worker.py")
+_DOCKERFILE = os.path.join(os.path.dirname(_CURR), "docker", "Dockerfile")
+_image_ready = False  # checked once per process
 
 # default return
 def _fail(message: str) -> dict:
@@ -52,6 +60,68 @@ def clean_code(text: str) -> str:
     fenced = re.search(r"```(?:python|py)?[ \t]*\n(.*?)```", text or "", re.DOTALL)
     text = fenced.group(1) if fenced else (text or "")
     return text.replace("```python", "").replace("```", "").strip()
+
+# Docker helpers
+def docker_available() -> bool:
+    """True <- the Docker client is installed and the daemon is running."""
+    try:
+        r = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
+                           capture_output=True, timeout=15)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+ 
+def prepare_sandbox() -> str | None:
+    """Check sandbox image exists and matches the installed pandas.
+ 
+    Builds it if needed (very slow for first build).
+    Returns an error message, or None when ready.
+    execute_code() calls it automatically;
+        (intended to) call it at app startup to avoid a slow first question.
+    """
+    global _image_ready
+    if _image_ready:
+        return None
+    try:
+        # If our image exists
+        # Read "pandas" label stored in the image
+        r = subprocess.run(["docker", "image", "inspect", "-f", "{{.Config.Labels.pandas}}", IMAGE],
+                           capture_output=True, timeout=30)
+        if r.returncode == 0 and r.stdout.decode().strip() == pd.__version__:
+            _image_ready = True
+            return None
+        # Missing/wrong pandas version: re-build to correct
+        with tempfile.TemporaryDirectory() as empty_context:  # open empty Docker
+            build = subprocess.run(
+                ["docker", "build", "-t", IMAGE, "-f", _DOCKERFILE,
+                 "--build-arg", f"PANDAS_VERSION={pd.__version__}",
+                 "--build-arg", f"NUMPY_VERSION={version('numpy')}", empty_context],
+                capture_output=True, timeout=900)
+    except OSError as exc:
+        return f"Execution Error: could not run Docker. Is it installed and on PATH? ({exc})"
+    except subprocess.TimeoutExpired:
+        return "Execution Error: building the sandbox image timed out."
+    if build.returncode != 0:
+        tail = build.stderr.decode("utf-8", "replace").strip()[-400:]
+        return f"Execution Error: could not build the sandbox image. Is Docker running? {tail}"
+    _image_ready = True
+    return None
+ 
+def _docker_base(name: str, memory_mb: int) -> list[str]:
+    """`docker run` flags for the locked-down container (image and command are appended)."""
+    limit = f"{memory_mb + 512}m"  # headroom for the Python + pandas baseline
+    return [
+        "docker", "run", "--rm", "-i", "--name", name,
+        "--network", "none", # stop network activity
+        "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
+        "--memory", limit, "--memory-swap", limit,  # fixed mem cap, no swap
+        "--cpus", "1", "--pids-limit", "64",  # limited CPU and fork-bomb
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--user", "65534:65534",  # any, but not root
+        "-e", "OMP_NUM_THREADS=1", "-e", "OPENBLAS_NUM_THREADS=1", "-e", "MKL_NUM_THREADS=1",
+        # only worker script is shared with the host, in read-only
+        "--mount", f"type=bind,source={_WORKER},target=/app/sandbox_worker.py,readonly",
+    ]
 
 # Set up the subprocess env to run the LLM code
 def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
