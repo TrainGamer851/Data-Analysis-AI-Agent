@@ -2,7 +2,15 @@ import pandas as pd
 import pytest
 
 from agent.execution_env import execute_code
+from agent.execution_env import docker_available, execute_code
 
+# Run test on the local, and on Docker if available
+@pytest.fixture(autouse=True, params=["local", "docker"])
+def backend(request, monkeypatch):
+    if request.param == "docker" and not docker_available():
+        pytest.skip("Docker is not available")
+    monkeypatch.setenv("SANDBOX_BACKEND", request.param)
+    
 # Mock data
 @pytest.fixture
 def df():

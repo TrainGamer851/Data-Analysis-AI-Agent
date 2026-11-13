@@ -143,6 +143,26 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
     if df is None or df.empty:
         return _fail("Execution Error: the dataset DataFrame is empty or None.")
 
+    docker = os.environ.get("SANDBOX_BACKEND", "local").lower() == "docker"
+    name = f"sandbox-{uuid.uuid4().hex[:12]}" # Tracking this docker env
+
+    if docker:
+        error = prepare_sandbox()
+        if error:
+            return _fail(error)
+        cmd = _docker_base(name, memory_mb) + [IMAGE, "python", "-I", "/app/sandbox_worker.py"]
+        env = None  # the docker client needs PATH etc.; the container only gets the -e flags
+    else:
+        cmd = [sys.executable, "-I", _WORKER]
+        # Set the child environment 
+        env = {
+            "OMP_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1"
+            }
+        if os.name == "nt":  # Python on Windows
+            env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
+
     payload = pickle.dumps({
         "code": code,
         "df": df,
@@ -150,28 +170,30 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         "max_rows": max_rows
         })
 
-    # Set the child environment 
-    env = {
-        "OMP_NUM_THREADS": "1",
-        "OPENBLAS_NUM_THREADS": "1",
-        "MKL_NUM_THREADS": "1"
-        }
-    if os.name == "nt":  # Python on Windows
-        env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
-
     with tempfile.TemporaryDirectory() as workdir: #Make a "fake" ttemp cwd to run
         try:
             proc = subprocess.run(
-                [sys.executable, "-I", _WORKER],
-                input=payload, capture_output=True, env=env, cwd=workdir,
-                timeout=timeout + STARTUP_GRACE,
+                cmd,
+                input=payload,
+                capture_output=True,
+                env=env,
+                cwd=workdir,
+                timeout=timeout + STARTUP_GRACE + (10 if docker else 0),
             )
         except subprocess.TimeoutExpired:
+            if docker: #kill docker
+                with contextlib.suppress(Exception):
+                    subprocess.run(["docker", "kill", name],
+                        capture_output=True,
+                        timeout=10
+                        )
             return _fail(f"Execution Error: code timed out after {timeout} seconds "
                          "(possible infinite loop). Use vectorized pandas operations.")
+        except OSError as exc:
+            return _fail(f"Execution Error: could not start the sandbox ({exc})")
 
     try:
         return json.loads(proc.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
     except (IndexError, ValueError):
-        stderr = proc.stderr.decode("utf-8", "replace").strip()[-300:]
+        stderr = proc.stderr.decode("utf-8", "replace").strip()[-400:]
         return _fail(f"Execution Error: worker crashed (exit code {proc.returncode}). {stderr}")
