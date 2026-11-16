@@ -1,5 +1,3 @@
-from logging import config
-
 import pandas as pd
 from agent.prompts import SYSTEM_PROMPT, build_analysis_prompt
 from agent.execution_env import execute_code
@@ -108,5 +106,10 @@ class QwenModelAdapter:
     }
 
 
+def run_analysis(csv_file: str, question: str):
+    df = pd.read_csv(csv_file)
 
+    prompt = build_analysis_prompt(question, df)
 
+    model = QwenModelAdapter()
+    environment = DataAnalysisEnvironment(df)
