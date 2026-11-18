@@ -5,7 +5,7 @@ from agent.llm_client import generate_response, get_model_config
 from minisweagent.agents.default import DefaultAgent
 
 
-# PART 1: ENVIRONMENT ADAPTER
+# ENVIRONMENT ADAPTER
 
 class DataAnalysisEnvironment:
     def __init__(self, df):
@@ -28,13 +28,7 @@ class DataAnalysisEnvironment:
 
 
 
-def run_analysis(csv_file: str, question: str):
-    df = pd.read_csv(csv_file)
-
-    prompt = build_analysis_prompt(question, df)
-
-
-# PART 2: MODEL ADAPTER
+# MODEL ADAPTER
 
 class QwenModelAdapter:
     def query(self, messages, **kwargs):
@@ -106,10 +100,61 @@ class QwenModelAdapter:
     }
 
 
+
+# MAIN AGENT RUNNER
+
 def run_analysis(csv_file: str, question: str):
-    df = pd.read_csv(csv_file)
+    # Step 1: Validate the user's question.
+    if not question or not question.strip():
+        return {
+            "answer": None,
+            "error": "Please enter a question."
+        }
 
-    prompt = build_analysis_prompt(question, df)
+    try:
+        # Step 2: Load the CSV dataset.
+        df = pd.read_csv(csv_file)
 
-    model = QwenModelAdapter()
-    environment = DataAnalysisEnvironment(df)
+        if df.empty:
+            return {
+                "answer": None,
+                "error": "The CSV dataset is empty."
+            }
+
+        # Step 3: Prepare the analysis prompt.
+        prompt = build_analysis_prompt(question, df)
+
+        # Step 4: Create the adapters.
+        model = QwenModelAdapter()
+        environment = DataAnalysisEnvironment(df)
+
+        # Step 5: Configure mini-swe-agent.
+        agent = DefaultAgent(
+            model=model,
+            env=environment,
+            system_template=SYSTEM_PROMPT,
+            instance_template="{{ task }}",
+            step_limit=3
+        )
+
+        # Step 6: Start the agent.
+        result = agent.run(task=prompt)
+
+        # Step 7: Return the calculated answer.
+        if result.get("exit_status") == "Submitted":
+            return {
+                "answer": result.get("submission"),
+                "error": None
+            }
+
+        return {
+            "answer": None,
+            "error": f"Agent stopped: {result.get('exit_status')}"
+        }
+
+    except Exception as error:
+        return {
+            "answer": None,
+            "error": str(error)
+        }
+
