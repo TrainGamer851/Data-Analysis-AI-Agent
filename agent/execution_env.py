@@ -33,7 +33,7 @@ from importlib.metadata import version
 import pandas as pd
 
 STARTUP_GRACE = 10  # extra seconds for interpreter + pandas startup
-MAX_ROWS = 200
+MAX_ROWS = 200      # change this please change also in prompts.py
 
 IMAGE = "data-agent-sandbox"
  
