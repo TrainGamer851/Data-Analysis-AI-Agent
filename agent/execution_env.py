@@ -170,6 +170,8 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         "max_rows": max_rows
         })
 
+    effective_timeout = timeout + STARTUP_GRACE + (10 if docker else 0)
+
     with tempfile.TemporaryDirectory() as workdir: #Make a "fake" ttemp cwd to run
         try:
             proc = subprocess.run(
@@ -178,7 +180,7 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
                 capture_output=True,
                 env=env,
                 cwd=workdir,
-                timeout=timeout + STARTUP_GRACE + (10 if docker else 0),
+                timeout=effective_timeout,
             )
         except subprocess.TimeoutExpired:
             if docker: #kill docker
@@ -188,7 +190,8 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
                         timeout=10
                         )
             return _fail(f"Execution Error: code timed out after {timeout} seconds "
-                         "(possible infinite loop). Use vectorized pandas operations.")
+                         f"(wall limit {effective_timeout}s including startup). "
+                         f"Use vectorized pandas operations.")
         except OSError as exc:
             return _fail(f"Execution Error: could not start the sandbox ({exc})")
 

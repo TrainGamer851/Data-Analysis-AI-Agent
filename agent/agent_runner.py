@@ -280,6 +280,14 @@ def run_analysis(csv_file: str, question: str, explain: bool = True):
     finally:
         _SLOTS.release()
 
+def check_limits_are_active(agent):
+    # Check step limit
+    config = agent.config
+    if (getattr(config, "step_limit", 0) != MAX_ATTEMPTS
+            or getattr(config, "wall_time_limit_seconds", 0) != AGENT_TIME_LIMIT_SECONDS):
+        raise RuntimeError("mini-swe-agent did not apply the step or time limit "
+                           "(this needs mini-swe-agent 2.3 or newer)")
+
 def run_agent(df, question, explain):
     environment = DataAnalysisEnvironment(df)
 
@@ -296,6 +304,7 @@ def run_agent(df, question, explain):
             step_limit=MAX_ATTEMPTS,
             wall_time_limit_seconds=AGENT_TIME_LIMIT_SECONDS,
         )
+        check_limits_are_active(agent)
 
         # Step 6: Start the agent.
         result = agent.run(task=prompt, system_prompt=SYSTEM_PROMPT + SECURITY_NOTE)
