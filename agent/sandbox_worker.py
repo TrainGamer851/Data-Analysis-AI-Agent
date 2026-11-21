@@ -37,7 +37,7 @@ LLM_FILENAME = "<llm_generated_code>" #Fake file name
 
 MAX_STDOUT = 10_000
 
-ALLOWED_IMPORTS = {"pandas", "numpy", "math", "datetime", "re"} # We can add more to expand the usage
+ALLOWED_IMPORTS = {"pandas", "numpy", "math", "datetime", "re"} # We can add more to expand the usage if change, also change in prompts.py
 SAFE_BUILTINS = (
     "abs all any bool dict enumerate filter float int isinstance len list map "
     "max min print range reversed round set sorted str sum tuple zip "
@@ -61,6 +61,8 @@ def _fail(message: str, stdout: str = "") -> dict:
 # Worker side (runs in the child interpreter that we previously open from parent)
 def _limit_memory(memory_mb: int) -> None:
     """Cap address space at current usage + memory_mb. Linux only; skipped elsewhere."""
+    if "pyarrow" in sys.modules:
+        return
     try:
         with open("/proc/self/statm") as fh:
             current = int(fh.read().split()[0]) * os.sysconf("SC_PAGE_SIZE")

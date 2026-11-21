@@ -16,6 +16,6 @@ openai >= 1.40          # OpenAI-compatible client used for NRP and Ollama
 python-dotenv >= 1.0    # loads NRP_API_KEY etc. from .env
 
 # Agent loop (agent_runner.py)
-
+mini-swe-agent >= 1.0
 # Tests
 pytest >= 8.0

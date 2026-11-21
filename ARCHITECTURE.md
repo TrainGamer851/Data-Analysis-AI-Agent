@@ -554,13 +554,13 @@ Completed:
 - Business analytics selected as the project focus.
 - Project folders and placeholder files created.
 - Architecture documentation prepared.
+- Agent prompts.
+- Mini-swe-agent integration.
+- Local and Docker Sandbox environment.
 
 Not Yet Implemented:
 
 - NRP model integration.
-- Agent prompts.
-- Mini-swe-agent integration.
-- Isolated execution environment.
 - Gradio-to-agent connection.
 - Business analytics benchmark evaluation system.
 
