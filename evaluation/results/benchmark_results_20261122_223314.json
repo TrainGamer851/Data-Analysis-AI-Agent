@@ -1,0 +1,400 @@
+{
+  "model": "qwen3",
+  "csv": "C:\\Users\\ivang\\Data-Analysis-AI-Agent\\data\\superstore_orders.csv",
+  "run_at": "20261122_223314",
+  "summary": {
+    "overall": {
+      "correct": 25,
+      "total": 25,
+      "accuracy": 100.0
+    },
+    "by_category": {
+      "aggregation": {
+        "correct": 6,
+        "total": 6,
+        "accuracy": 100.0
+      },
+      "grouping": {
+        "correct": 6,
+        "total": 6,
+        "accuracy": 100.0
+      },
+      "multi_step": {
+        "correct": 2,
+        "total": 2,
+        "accuracy": 100.0
+      },
+      "ranking": {
+        "correct": 2,
+        "total": 2,
+        "accuracy": 100.0
+      },
+      "ratio": {
+        "correct": 3,
+        "total": 3,
+        "accuracy": 100.0
+      },
+      "time": {
+        "correct": 4,
+        "total": 4,
+        "accuracy": 100.0
+      },
+      "unanswerable": {
+        "correct": 2,
+        "total": 2,
+        "accuracy": 100.0
+      }
+    },
+    "by_difficulty": {
+      "easy": {
+        "correct": 6,
+        "total": 6,
+        "accuracy": 100.0
+      },
+      "hard": {
+        "correct": 5,
+        "total": 5,
+        "accuracy": 100.0
+      },
+      "medium": {
+        "correct": 14,
+        "total": 14,
+        "accuracy": 100.0
+      }
+    },
+    "errors": 0,
+    "avg_seconds": 35.85
+  },
+  "results": [
+    {
+      "id": "Q01",
+      "category": "aggregation",
+      "difficulty": "easy",
+      "question": "What are the total sales across all orders?",
+      "expected": 2326534.35,
+      "answer": "2326534.35",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 8.67
+    },
+    {
+      "id": "Q02",
+      "category": "aggregation",
+      "difficulty": "easy",
+      "question": "What is the total profit across all orders?",
+      "expected": 292296.81,
+      "answer": "292296.81",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 14.45
+    },
+    {
+      "id": "Q03",
+      "category": "aggregation",
+      "difficulty": "easy",
+      "question": "How many unique orders are in the dataset?",
+      "expected": 5111,
+      "answer": "5111",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 19.54
+    },
+    {
+      "id": "Q04",
+      "category": "aggregation",
+      "difficulty": "easy",
+      "question": "How many unique customers are there, counted by Customer ID?",
+      "expected": 804,
+      "answer": "804",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 8.97
+    },
+    {
+      "id": "Q05",
+      "category": "aggregation",
+      "difficulty": "easy",
+      "question": "What is the total quantity of items sold?",
+      "expected": 38654,
+      "answer": "38654",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 12.58
+    },
+    {
+      "id": "Q06",
+      "category": "aggregation",
+      "difficulty": "easy",
+      "question": "How many unique orders were shipped using Same Day shipping?",
+      "expected": 266,
+      "answer": "266",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 14.17
+    },
+    {
+      "id": "Q07",
+      "category": "grouping",
+      "difficulty": "medium",
+      "question": "Which product category has the highest total sales, and what is that total?",
+      "expected": {
+        "category": "Technology",
+        "total_sales": 839893.28
+      },
+      "answer": "{'Category': 'Technology', 'Total_Sales': 839893.28}",
+      "error": null,
+      "correct": true,
+      "reason": "all expected values found",
+      "seconds": 40.53
+    },
+    {
+      "id": "Q08",
+      "category": "grouping",
+      "difficulty": "medium",
+      "question": "Which region has the highest total profit, and what is that total?",
+      "expected": {
+        "region": "West",
+        "total_profit": 110798.82
+      },
+      "answer": "{'region': 'West', 'total_profit': 110798.82}",
+      "error": null,
+      "correct": true,
+      "reason": "all expected values found",
+      "seconds": 64.94
+    },
+    {
+      "id": "Q09",
+      "category": "grouping",
+      "difficulty": "medium",
+      "question": "What are the total sales for each customer segment?",
+      "expected": {
+        "Consumer": 1170659.79,
+        "Corporate": 715806.13,
+        "Home Office": 440068.43
+      },
+      "answer": "[{'Segment': 'Consumer', 'Sales': 1170659.79}, {'Segment': 'Corporate', 'Sales': 715806.13}, {'Segment': 'Home Office', 'Sales': 440068.43}]",
+      "error": null,
+      "correct": true,
+      "reason": "all expected values found",
+      "seconds": 12.72
+    },
+    {
+      "id": "Q10",
+      "category": "grouping",
+      "difficulty": "medium",
+      "question": "Which sub-category has the lowest total profit, and what is that total?",
+      "expected": {
+        "sub_category": "Tables",
+        "total_profit": -17753.21
+      },
+      "answer": "{'Sub-Category': 'Tables', 'Total Profit': -17753.21}",
+      "error": null,
+      "correct": true,
+      "reason": "all expected values found",
+      "seconds": 41.89
+    },
+    {
+      "id": "Q11",
+      "category": "grouping",
+      "difficulty": "medium",
+      "question": "Which state or province has the highest total sales?",
+      "expected": "California",
+      "answer": "California",
+      "error": null,
+      "correct": true,
+      "reason": "text matches",
+      "seconds": 18.34
+    },
+    {
+      "id": "Q12",
+      "category": "ranking",
+      "difficulty": "medium",
+      "question": "Who are the top 5 customers by total sales, from highest to lowest?",
+      "expected": [
+        "Sean Miller",
+        "Tamara Chand",
+        "Raymond Buch",
+        "Tom Ashbrook",
+        "Adrian Barton"
+      ],
+      "answer": "[{'index': 711, 'Customer ID': 'SM-20320', 'Customer Name': 'Sean Miller', 'Total_Sales': 25043.05}, {'index': 752, 'Customer ID': 'TC-20980', 'Customer Name': 'Tamara Chand', 'Total_Sales': 19052.22}, {'index': 632, 'Customer ID': 'RB-19360', 'Customer Name': 'Raymond Buch', 'Total_Sales': 15117.34}, {'index': 741, 'Customer ID': 'TA-21385', 'Customer Name': 'Tom Ashbrook', 'Total_Sales': 14595.62}, {'index': 6, 'Customer ID': 'AB-10105', 'Customer Name': 'Adrian Barton', 'Total_Sales': 14473.57}]",
+      "error": null,
+      "correct": true,
+      "reason": "list matches in order",
+      "seconds": 26.04
+    },
+    {
+      "id": "Q13",
+      "category": "ranking",
+      "difficulty": "medium",
+      "question": "Which product, grouped by Product Name, has the highest total quantity sold?",
+      "expected": "Staples",
+      "answer": "Staples",
+      "error": null,
+      "correct": true,
+      "reason": "text matches",
+      "seconds": 13.69
+    },
+    {
+      "id": "Q14",
+      "category": "grouping",
+      "difficulty": "medium",
+      "question": "Which sub-categories have a negative total profit?",
+      "expected": [
+        "Bookcases",
+        "Supplies",
+        "Tables"
+      ],
+      "answer": "['Bookcases', 'Supplies', 'Tables']",
+      "error": null,
+      "correct": true,
+      "reason": "list matches",
+      "seconds": 22.76
+    },
+    {
+      "id": "Q15",
+      "category": "ratio",
+      "difficulty": "medium",
+      "question": "What is the overall profit margin as a percentage of sales?",
+      "expected": 12.56,
+      "answer": "12.56",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 37.1
+    },
+    {
+      "id": "Q16",
+      "category": "ratio",
+      "difficulty": "medium",
+      "question": "What is the profit margin percentage for each product category?",
+      "expected": {
+        "Furniture": 2.61,
+        "Office Supplies": 17.22,
+        "Technology": 17.45
+      },
+      "answer": "[{'Category': 'Furniture', 'Profit_Margin_Percentage': 2.61}, {'Category': 'Office Supplies', 'Profit_Margin_Percentage': 17.22}, {'Category': 'Technology', 'Profit_Margin_Percentage': 17.45}]",
+      "error": null,
+      "correct": true,
+      "reason": "all expected values found",
+      "seconds": 45.3
+    },
+    {
+      "id": "Q17",
+      "category": "ratio",
+      "difficulty": "medium",
+      "question": "What is the average order value (total sales divided by the number of unique orders)?",
+      "expected": 455.2,
+      "answer": "455.2",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 22.05
+    },
+    {
+      "id": "Q18",
+      "category": "time",
+      "difficulty": "medium",
+      "question": "Which year had the highest total sales, and what was that total?",
+      "expected": {
+        "year": 2026,
+        "total_sales": 745567.53
+      },
+      "answer": "{'year': 2026, 'total_sales': 745567.53}",
+      "error": null,
+      "correct": true,
+      "reason": "all expected values found",
+      "seconds": 28.8
+    },
+    {
+      "id": "Q19",
+      "category": "time",
+      "difficulty": "hard",
+      "question": "What was the year-over-year sales growth percentage from 2025 to 2026?",
+      "expected": 21.44,
+      "answer": "21.44",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 121.19
+    },
+    {
+      "id": "Q20",
+      "category": "time",
+      "difficulty": "hard",
+      "question": "In 2026, which month had the highest total sales?",
+      "expected": "November",
+      "answer": "November",
+      "error": null,
+      "correct": true,
+      "reason": "text matches",
+      "seconds": 176.45
+    },
+    {
+      "id": "Q21",
+      "category": "time",
+      "difficulty": "hard",
+      "question": "What is the average number of days between order date and ship date?",
+      "expected": 3.96,
+      "answer": "3.96",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 27.53
+    },
+    {
+      "id": "Q22",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "question": "In the West region, which sub-category has the lowest total profit?",
+      "expected": "Bookcases",
+      "answer": "Bookcases",
+      "error": null,
+      "correct": true,
+      "reason": "text matches",
+      "seconds": 67.46
+    },
+    {
+      "id": "Q23",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "question": "What is the total profit on line items with a discount greater than 20%?",
+      "expected": -136020.69,
+      "answer": "-136020.69",
+      "error": null,
+      "correct": true,
+      "reason": "number matches",
+      "seconds": 20.89
+    },
+    {
+      "id": "Q24",
+      "category": "unanswerable",
+      "difficulty": "medium",
+      "question": "What was the total marketing spend in 2025?",
+      "expected": "The dataset has no marketing or advertising spend column.",
+      "answer": "Marketing spend data is not available in the provided dataset.",
+      "error": null,
+      "correct": true,
+      "reason": "agent said the data is not available",
+      "seconds": 21.95
+    },
+    {
+      "id": "Q25",
+      "category": "unanswerable",
+      "difficulty": "medium",
+      "question": "What is the average age of our customers?",
+      "expected": "The dataset has no customer age or birth date column.",
+      "answer": "Average customer age cannot be calculated because the dataset does not contain age or date-of-birth information.",
+      "error": null,
+      "correct": true,
+      "reason": "agent said the data is not available",
+      "seconds": 8.44
+    }
+  ]
+}
