@@ -344,6 +344,14 @@ def print_report(summary):
     print(f"Average time per question: {summary['avg_seconds']}s")
 
 
+def display_path(path):
+    """Repo-relative path with forward slashes, so saved results hold no local usernames."""
+    try:
+        return os.path.relpath(path, ROOT).replace("\\", "/")
+    except ValueError:  # different drive on Windows: no relative path exists
+        return os.path.basename(path)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--csv", default=DEFAULT_CSV, help="dataset CSV")
@@ -378,7 +386,7 @@ def main(argv=None):
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_path = os.path.join(args.out, f"benchmark_results_{stamp}.json")
     with open(out_path, "w") as fh:
-        json.dump({"model": model, "csv": args.csv, "run_at": stamp,
+        json.dump({"model": model, "csv": display_path(args.csv), "run_at": stamp,
                    "summary": summary, "results": results}, fh, indent=2, default=str)
         fh.write("\n")
     print(f"\nSaved results to {out_path}")

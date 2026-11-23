@@ -1,6 +1,6 @@
 {
   "model": "qwen3",
-  "csv": "C:\\Users\\ivang\\Data-Analysis-AI-Agent\\data\\superstore_orders.csv",
+  "csv": "data/superstore_orders.csv",
   "run_at": "20261122_223314",
   "summary": {
     "overall": {
