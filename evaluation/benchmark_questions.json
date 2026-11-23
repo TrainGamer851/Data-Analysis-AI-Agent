@@ -1,1 +1,282 @@
-[]
+[
+  {
+    "id": "Q01",
+    "question": "What are the total sales across all orders?",
+    "category": "aggregation",
+    "difficulty": "easy",
+    "answer_type": "number",
+    "expected": 2326534.35,
+    "tolerance": 0.01,
+    "reference_code": "expected = round(df['Sales'].sum(), 2)"
+  },
+  {
+    "id": "Q02",
+    "question": "What is the total profit across all orders?",
+    "category": "aggregation",
+    "difficulty": "easy",
+    "answer_type": "number",
+    "expected": 292296.81,
+    "tolerance": 0.01,
+    "reference_code": "expected = round(df['Profit'].sum(), 2)"
+  },
+  {
+    "id": "Q03",
+    "question": "How many unique orders are in the dataset?",
+    "category": "aggregation",
+    "difficulty": "easy",
+    "answer_type": "number",
+    "expected": 5111,
+    "tolerance": 0,
+    "reference_code": "expected = int(df['Order ID'].nunique())"
+  },
+  {
+    "id": "Q04",
+    "question": "How many unique customers are there, counted by Customer ID?",
+    "category": "aggregation",
+    "difficulty": "easy",
+    "answer_type": "number",
+    "expected": 804,
+    "tolerance": 0,
+    "reference_code": "expected = int(df['Customer ID'].nunique())"
+  },
+  {
+    "id": "Q05",
+    "question": "What is the total quantity of items sold?",
+    "category": "aggregation",
+    "difficulty": "easy",
+    "answer_type": "number",
+    "expected": 38654,
+    "tolerance": 0,
+    "reference_code": "expected = int(df['Quantity'].sum())"
+  },
+  {
+    "id": "Q06",
+    "question": "How many unique orders were shipped using Same Day shipping?",
+    "category": "aggregation",
+    "difficulty": "easy",
+    "answer_type": "number",
+    "expected": 266,
+    "tolerance": 0,
+    "reference_code": "expected = int(df.loc[df['Ship Mode'] == 'Same Day', 'Order ID'].nunique())"
+  },
+  {
+    "id": "Q07",
+    "question": "Which product category has the highest total sales, and what is that total?",
+    "category": "grouping",
+    "difficulty": "medium",
+    "answer_type": "dict",
+    "expected": {
+      "category": "Technology",
+      "total_sales": 839893.28
+    },
+    "tolerance": 0.01,
+    "reference_code": "s = df.groupby('Category')['Sales'].sum()\nexpected = {'category': s.idxmax(), 'total_sales': round(s.max(), 2)}"
+  },
+  {
+    "id": "Q08",
+    "question": "Which region has the highest total profit, and what is that total?",
+    "category": "grouping",
+    "difficulty": "medium",
+    "answer_type": "dict",
+    "expected": {
+      "region": "West",
+      "total_profit": 110798.82
+    },
+    "tolerance": 0.01,
+    "reference_code": "s = df.groupby('Region')['Profit'].sum()\nexpected = {'region': s.idxmax(), 'total_profit': round(s.max(), 2)}"
+  },
+  {
+    "id": "Q09",
+    "question": "What are the total sales for each customer segment?",
+    "category": "grouping",
+    "difficulty": "medium",
+    "answer_type": "dict",
+    "expected": {
+      "Consumer": 1170659.79,
+      "Corporate": 715806.13,
+      "Home Office": 440068.43
+    },
+    "tolerance": 0.01,
+    "reference_code": "expected = df.groupby('Segment')['Sales'].sum().round(2).to_dict()"
+  },
+  {
+    "id": "Q10",
+    "question": "Which sub-category has the lowest total profit, and what is that total?",
+    "category": "grouping",
+    "difficulty": "medium",
+    "answer_type": "dict",
+    "expected": {
+      "sub_category": "Tables",
+      "total_profit": -17753.21
+    },
+    "tolerance": 0.01,
+    "reference_code": "s = df.groupby('Sub-Category')['Profit'].sum()\nexpected = {'sub_category': s.idxmin(), 'total_profit': round(s.min(), 2)}"
+  },
+  {
+    "id": "Q11",
+    "question": "Which state or province has the highest total sales?",
+    "category": "grouping",
+    "difficulty": "medium",
+    "answer_type": "text",
+    "expected": "California",
+    "tolerance": null,
+    "reference_code": "expected = df.groupby('State/Province')['Sales'].sum().idxmax()"
+  },
+  {
+    "id": "Q12",
+    "question": "Who are the top 5 customers by total sales, from highest to lowest?",
+    "category": "ranking",
+    "difficulty": "medium",
+    "answer_type": "list",
+    "expected": [
+      "Sean Miller",
+      "Tamara Chand",
+      "Raymond Buch",
+      "Tom Ashbrook",
+      "Adrian Barton"
+    ],
+    "tolerance": null,
+    "reference_code": "expected = df.groupby('Customer Name')['Sales'].sum().nlargest(5).index.tolist()"
+  },
+  {
+    "id": "Q13",
+    "question": "Which product, grouped by Product Name, has the highest total quantity sold?",
+    "category": "ranking",
+    "difficulty": "medium",
+    "answer_type": "text",
+    "expected": "Staples",
+    "tolerance": null,
+    "reference_code": "expected = df.groupby('Product Name')['Quantity'].sum().idxmax()"
+  },
+  {
+    "id": "Q14",
+    "question": "Which sub-categories have a negative total profit?",
+    "category": "grouping",
+    "difficulty": "medium",
+    "answer_type": "list",
+    "expected": [
+      "Bookcases",
+      "Supplies",
+      "Tables"
+    ],
+    "tolerance": null,
+    "reference_code": "s = df.groupby('Sub-Category')['Profit'].sum()\nexpected = sorted(s[s < 0].index.tolist())"
+  },
+  {
+    "id": "Q15",
+    "question": "What is the overall profit margin as a percentage of sales?",
+    "category": "ratio",
+    "difficulty": "medium",
+    "answer_type": "number",
+    "expected": 12.56,
+    "tolerance": 0.01,
+    "reference_code": "expected = round(df['Profit'].sum() / df['Sales'].sum() * 100, 2)"
+  },
+  {
+    "id": "Q16",
+    "question": "What is the profit margin percentage for each product category?",
+    "category": "ratio",
+    "difficulty": "medium",
+    "answer_type": "dict",
+    "expected": {
+      "Furniture": 2.61,
+      "Office Supplies": 17.22,
+      "Technology": 17.45
+    },
+    "tolerance": 0.01,
+    "reference_code": "g = df.groupby('Category')[['Sales', 'Profit']].sum()\nexpected = (g['Profit'] / g['Sales'] * 100).round(2).to_dict()"
+  },
+  {
+    "id": "Q17",
+    "question": "What is the average order value (total sales divided by the number of unique orders)?",
+    "category": "ratio",
+    "difficulty": "medium",
+    "answer_type": "number",
+    "expected": 455.2,
+    "tolerance": 0.01,
+    "reference_code": "expected = round(df['Sales'].sum() / df['Order ID'].nunique(), 2)"
+  },
+  {
+    "id": "Q18",
+    "question": "Which year had the highest total sales, and what was that total?",
+    "category": "time",
+    "difficulty": "medium",
+    "answer_type": "dict",
+    "expected": {
+      "year": 2026,
+      "total_sales": 745567.53
+    },
+    "tolerance": 0.01,
+    "reference_code": "y = pd.to_datetime(df['Order Date'], format='%m/%d/%y').dt.year\ns = df.groupby(y)['Sales'].sum()\nexpected = {'year': int(s.idxmax()), 'total_sales': round(s.max(), 2)}"
+  },
+  {
+    "id": "Q19",
+    "question": "What was the year-over-year sales growth percentage from 2025 to 2026?",
+    "category": "time",
+    "difficulty": "hard",
+    "answer_type": "number",
+    "expected": 21.44,
+    "tolerance": 0.01,
+    "reference_code": "y = pd.to_datetime(df['Order Date'], format='%m/%d/%y').dt.year\ns = df.groupby(y)['Sales'].sum()\nexpected = round((s[2026] - s[2025]) / s[2025] * 100, 2)"
+  },
+  {
+    "id": "Q20",
+    "question": "In 2026, which month had the highest total sales?",
+    "category": "time",
+    "difficulty": "hard",
+    "answer_type": "text",
+    "expected": "November",
+    "tolerance": null,
+    "reference_code": "d = pd.to_datetime(df['Order Date'], format='%m/%d/%y')\ns = df[d.dt.year == 2026].groupby(d.dt.month)['Sales'].sum()\nexpected = pd.Timestamp(2026, int(s.idxmax()), 1).month_name()"
+  },
+  {
+    "id": "Q21",
+    "question": "What is the average number of days between order date and ship date?",
+    "category": "time",
+    "difficulty": "hard",
+    "answer_type": "number",
+    "expected": 3.96,
+    "tolerance": 0.01,
+    "reference_code": "o = pd.to_datetime(df['Order Date'], format='%m/%d/%y')\nsh = pd.to_datetime(df['Ship Date'], format='%m/%d/%y')\nexpected = round((sh - o).dt.days.mean(), 2)"
+  },
+  {
+    "id": "Q22",
+    "question": "In the West region, which sub-category has the lowest total profit?",
+    "category": "multi_step",
+    "difficulty": "hard",
+    "answer_type": "text",
+    "expected": "Bookcases",
+    "tolerance": null,
+    "reference_code": "w = df[df['Region'] == 'West']\nexpected = w.groupby('Sub-Category')['Profit'].sum().idxmin()"
+  },
+  {
+    "id": "Q23",
+    "question": "What is the total profit on line items with a discount greater than 20%?",
+    "category": "multi_step",
+    "difficulty": "hard",
+    "answer_type": "number",
+    "expected": -136020.69,
+    "tolerance": 0.01,
+    "reference_code": "expected = round(df.loc[df['Discount'] > 0.2, 'Profit'].sum(), 2)"
+  },
+  {
+    "id": "Q24",
+    "question": "What was the total marketing spend in 2025?",
+    "category": "unanswerable",
+    "difficulty": "medium",
+    "answer_type": "unanswerable",
+    "expected": "The dataset has no marketing or advertising spend column.",
+    "tolerance": null,
+    "reference_code": "expected = 'The dataset has no marketing or advertising spend column.'"
+  },
+  {
+    "id": "Q25",
+    "question": "What is the average age of our customers?",
+    "category": "unanswerable",
+    "difficulty": "medium",
+    "answer_type": "unanswerable",
+    "expected": "The dataset has no customer age or birth date column.",
+    "tolerance": null,
+    "reference_code": "expected = 'The dataset has no customer age or birth date column.'"
+  }
+]

@@ -8,3 +8,9 @@ __pycache__/
 .venv-2/
 .pytest_cache/
 agent.zip
+graphify-out
+.env.*
+!.env.example
+venv/
+.vscode/
+*.egg-info/
