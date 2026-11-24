@@ -1,6 +1,7 @@
 import gradio as gr
 import pandas as pd
 from pathlib import Path
+from agent.agent_runner import run_analysis
 
 # ----------------------------------
 # Business dashboard theme
@@ -108,7 +109,7 @@ def load_csv(file_path):
             "Please upload a CSV file first.",
             "",
             "",
-            pd.DataFrame(),
+            None,
         )
 
     try:
@@ -121,22 +122,25 @@ def load_csv(file_path):
                 f"CSV file '{file_name}' is empty.",
                 "",
                 "",
-                pd.DataFrame(),
+                None,
             )
-
-        total_rows = str(df.shape[0])
-        total_columns = str(df.shape[1])
 
         return (
             df.head(100),
             "CSV file loaded successfully!",
-            total_rows,
-            total_columns,
-            df,
+            str(df.shape[0]),
+            str(df.shape[1]),
+            str(file_path),
         )
 
     except Exception as error:
-        return (pd.DataFrame(), f"Error loading CSV: {error}", "", "", pd.DataFrame())
+        return (
+            pd.DataFrame(),
+            f"Error loading CSV: {error}",
+            "",
+            "",
+            None,
+        )
 
 
 # ----------------------------------
@@ -144,16 +148,39 @@ def load_csv(file_path):
 # ----------------------------------
 
 
-def analyze_question(question, dataframe):
-    if dataframe is None or dataframe.empty:
+def analyze_question(question, csv_path):
+    if not csv_path:
         return "Please upload a CSV file first."
 
     if not question or not question.strip():
         return "Please enter a question about your dataset."
 
-    return (
-        f"Question received: {question}\n\n" "AI analysis will be available in Stage 2."
-    )
+    try:
+        response = run_analysis(
+            csv_path,
+            question,
+            explain=True,
+        )
+
+        if response.get("error"):
+            return f"**Analysis Error:** {response['error']}"
+
+        answer = str(response.get("answer") or "No answer returned.")
+        table = response.get("table")
+
+        if table:
+            result_df = pd.DataFrame(table)
+
+            answer += "\n\n### Supporting Data\n\n"
+            answer += result_df.to_markdown(
+                index=False,
+                floatfmt=",.2f",
+            )
+
+        return answer
+
+    except Exception:
+        return "An unexpected analysis error occurred. Please try again."
 
 
 # ----------------------------------
@@ -161,34 +188,50 @@ def analyze_question(question, dataframe):
 # ----------------------------------
 
 
-def send_message(question, history, dataframe):
-    """Append one user/assistant exchange to session chat history."""
+def send_message(question, history, csv_path):
     history = list(history or [])
+
     if not question or not question.strip():
         return history, ""
 
     question = question.strip()
-    # UI-only integration point: replace analyze_question with the agent
-    # runner once the backend team provides a stable function.
-    answer = analyze_question(question, dataframe)
-    history.extend(
-        [
-            {"role": "user", "content": question},
-            {"role": "assistant", "content": str(answer)},
-        ]
-    )
+    answer = analyze_question(question, csv_path)
+
+    history.extend([
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": answer},
+    ])
+
     return history, ""
 
 
 def load_csv_and_reset_chat(file_path):
-    """Load a dataset and start a fresh conversation for it."""
-    preview, status, rows, columns, df = load_csv(file_path)
-    return preview, status, rows, columns, df, []
+    preview, status, rows, columns, csv_path = load_csv(file_path)
+    return preview, status, rows, columns, csv_path, []
 
 
 # ----------------------------------
 # Build the Gradio interface
 # ----------------------------------
+
+def start_processing():
+    return (
+        gr.update(visible=False),
+        gr.update(visible=True),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+        gr.update(interactive=False),
+    )
+
+
+def stop_processing():
+    return (
+        gr.update(visible=True),
+        gr.update(visible=False),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+        gr.update(interactive=True),
+    )
 
 with gr.Blocks(title="Business Insights | Data Analysis") as demo:
     dataset_state = gr.State(value=None)
@@ -251,14 +294,21 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
                     scale=1,
                     elem_id="send-button",
                 )
+                stop_button = gr.Button(
+                    "Stop",
+                    variant="stop",
+                    scale=1,
+                    visible=False,
+                    elem_id="stop-button",
+                )
             clear_button = gr.Button(
                 "Clear Conversation",
                 variant="secondary",
             )
 
     gr.Markdown(
-        "Analysis responses currently use the existing placeholder backend. "
-        "The agent team can connect its runner to `analyze_question()` later.",
+        "AI-powered analysis using Python, pandas, and mini-swe-agent. "
+        "Review calculated results before making business decisions.",
         elem_id="footer-note",
     )
 
@@ -274,18 +324,55 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
             chatbot,
         ],
     )
-    send_button.click(
-        fn=send_message,
-        inputs=[question_input, chatbot, dataset_state],
-        outputs=[chatbot, question_input],
+    processing_controls = [
+        send_button,
+        stop_button,
+        question_input,
+        load_button,
+        clear_button,
+    ]
+
+    # Start analysis by clicking Send or pressing Enter.
+    start_event = gr.on(
+        triggers=[
+            send_button.click,
+            question_input.submit,
+        ],
+        fn=start_processing,
+        inputs=None,
+        outputs=processing_controls,
+        queue=False,
     )
-    question_input.submit(
+
+    # Run the business analysis.
+    analysis_event = start_event.then(
         fn=send_message,
         inputs=[question_input, chatbot, dataset_state],
         outputs=[chatbot, question_input],
+        show_progress="minimal",
+    )
+
+    # Restore controls when analysis finishes.
+    analysis_event.then(
+        fn=stop_processing,
+        inputs=None,
+        outputs=processing_controls,
+        queue=False,
+    )
+
+    # Stop the pending analysis and restore controls.
+    stop_button.click(
+        fn=stop_processing,
+        inputs=None,
+        outputs=processing_controls,
+        cancels=[analysis_event],
+        queue=False,
     )
     clear_button.click(fn=lambda: [], outputs=[chatbot])
 
 
 if __name__ == "__main__":
-    demo.launch(theme=business_theme, css=business_css)
+    demo.queue().launch(
+        theme=business_theme,
+        css=business_css,
+    )

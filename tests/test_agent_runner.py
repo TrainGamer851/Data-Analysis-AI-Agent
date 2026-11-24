@@ -63,8 +63,12 @@ def csv_file(tmp_path):
 @pytest.mark.parametrize("question", ["", "   ", None])
 def test_blank_question_is_rejected(fake_llm, csv_file, question):
     llm = fake_llm("result = 1")
-    out = run_analysis(csv_file, question)
-    assert out == {"answer": None, "error": "Please enter a question."}
+    out = run_analysis(csv_file, question, explain=False)
+    assert out == {
+        "answer": None,
+        "table": None,
+        "error": "Please enter a question.",
+    }
     assert llm.calls == []
 
 
@@ -72,15 +76,16 @@ def test_empty_csv_is_rejected(fake_llm, tmp_path):
     path = tmp_path / "empty.csv"
     path.write_text("Order ID,Sales\n")
     llm = fake_llm("result = 1")
-    out = run_analysis(str(path), "What are total sales?")
-    assert out == {"answer": None, "error": "The CSV dataset is empty."}
+    out = run_analysis(str(path), "What are total sales?", explain=False)
+    assert out == {"answer": None, "table": None, "error": "The CSV dataset is empty."}
     assert llm.calls == []
 
 
 def test_missing_csv_returns_error(fake_llm, tmp_path):
     llm = fake_llm("result = 1")
-    out = run_analysis(str(tmp_path / "nope.csv"), "What are total sales?")
+    out = run_analysis(str(tmp_path / "nope.csv"), "What are total sales?", explain=False)
     assert out["answer"] is None
+    assert out["table"] is None
     assert out["error"]
     assert llm.calls == []
 
@@ -91,27 +96,28 @@ def test_missing_csv_returns_error(fake_llm, tmp_path):
 
 def test_scalar_answer(fake_llm, csv_file):
     llm = fake_llm("result = round(df['Sales'].sum(), 2)")
-    out = run_analysis(csv_file, "What are total sales?")
-    assert out == {"answer": "375.5", "error": None}
+    out = run_analysis(csv_file, "What are total sales?", explain=False)
+    assert out == {"answer": "375.5", "table": None, "error": None}
     assert len(llm.calls) == 1
 
 
 def test_grouped_answer_comes_back_as_rows(fake_llm, csv_file):
     fake_llm("result = df.groupby('Region')['Sales'].sum()")
-    out = run_analysis(csv_file, "Total sales by region?")
+    out = run_analysis(csv_file,"Total sales by region?", explain=False)
     assert out["error"] is None
-    assert "'West'" in out["answer"] and "150.0" in out["answer"]
+    assert out["answer"] == "The analysis returned 3 row(s)."
+    assert {"Region": "West", "Sales": 150.0} in out["table"]
 
 
 def test_code_in_markdown_fences_still_runs(fake_llm, csv_file):
-    fake_llm("```python\nresult = df['Order ID'].nunique()\n```")
-    out = run_analysis(csv_file, "How many unique orders?")
-    assert out == {"answer": "3", "error": None}
+    llm = fake_llm("```python\nresult = df['Order ID'].nunique()\n```")
+    out = run_analysis(csv_file, "How many unique orders?", explain=False)
+    assert out == {"answer": "3", "table": None, "error": None}
 
 
 def test_prompt_contains_question_and_schema(fake_llm, csv_file):
     llm = fake_llm("result = 1")
-    run_analysis(csv_file, "Which region is most profitable?")
+    run_analysis(csv_file, "Which region is most profitable?", explain=False)
     first_call = llm.calls[0]
     roles = [m["role"] for m in first_call]
     assert roles[0] == "system"
@@ -131,8 +137,8 @@ def test_failed_code_is_retried_with_the_error(fake_llm, csv_file):
         "result = df['Revenue'].sum()",        # wrong column -> KeyError
         "result = round(df['Sales'].sum(), 2)",  # corrected
     )
-    out = run_analysis(csv_file, "What are total sales?")
-    assert out == {"answer": "375.5", "error": None}
+    out = run_analysis(csv_file, "What are total sales?", explain=False)
+    assert out == {"answer": "375.5", "table": None, "error": None}
     assert len(llm.calls) == 2
     feedback = llm.calls[1][-1]
     assert feedback["role"] == "user"
@@ -142,30 +148,34 @@ def test_failed_code_is_retried_with_the_error(fake_llm, csv_file):
 
 def test_agent_gives_up_after_step_limit(fake_llm, csv_file):
     llm = fake_llm("result = 1 / 0")
-    out = run_analysis(csv_file, "What are total sales?")
+    out = run_analysis(csv_file, "What are total sales?", explain=False)
     assert out["answer"] is None
-    assert out["error"].startswith("Agent stopped")
-    assert len(llm.calls) == 3  # step_limit=3 in run_analysis
+    assert out["table"] is None
+    assert "after 3 attempts" in out["error"]
+    assert len(llm.calls) == 3
 
 
 def test_code_without_result_counts_as_failure(fake_llm, csv_file):
     llm = fake_llm("total = df['Sales'].sum()", "result = df['Sales'].sum()")
-    out = run_analysis(csv_file, "What are total sales?")
-    assert out == {"answer": "375.5", "error": None}
+    out = run_analysis(csv_file, "What are total sales?", explain=False)
+    assert out == {"answer": "375.5", "table": None, "error": None}
     assert "result" in llm.calls[1][-1]["content"]
 
 
 def test_blank_llm_reply_returns_error(fake_llm, csv_file):
     fake_llm("   ")
-    out = run_analysis(csv_file, "What are total sales?")
+    out = run_analysis(csv_file, "What are total sales?", explain=False)
     assert out["answer"] is None
-    assert "no Python code" in out["error"]
+    assert out["table"] is None
+    assert "RepeatedFormatError" in out["error"]
 
 
 def test_llm_exception_returns_error(fake_llm, csv_file):
     fake_llm(ConnectionError("NRP is down"))
-    out = run_analysis(csv_file, "What are total sales?")
-    assert out == {"answer": None, "error": "NRP is down"}
+    out = run_analysis(csv_file, "What are total sales?", explain=False)
+    assert out["answer"] is None
+    assert out["table"] is None
+    assert "ConnectionError" in out["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -176,9 +186,60 @@ def test_environment_success_and_failure():
     env = DataAnalysisEnvironment(pd.DataFrame({"Sales": [1.0, 2.0]}))
 
     ok = env.execute({"code": "result = df['Sales'].sum()"})
-    assert ok == {"output": "3.0", "returncode": 0, "exception_info": ""}
+
+    assert ok == {
+        "output": "3.0",
+        "returncode": 0,
+        "exception_info": "",
+        "sandbox_broken": False,
+    }
 
     bad = env.execute({"code": "result = df['Nope'].sum()"})
+
     assert bad["returncode"] == 1
     assert bad["output"] == ""
     assert "Nope" in bad["exception_info"]
+    assert bad["sandbox_broken"] is False
+
+# ---------------------------------------------------------------------------
+# Explanation stage
+# ---------------------------------------------------------------------------
+
+def test_explanation_stage(fake_llm, csv_file):
+    llm = fake_llm(
+        "result = df['Sales'].sum()",
+        "The total sales are $375.50.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "What are total sales?",
+        explain=True,
+    )
+
+    assert out == {
+        "answer": "The total sales are $375.50.",
+        "table": None,
+        "error": None,
+    }
+
+    assert len(llm.calls) == 2
+
+
+def test_explanation_failure_preserves_result(fake_llm, csv_file):
+    fake_llm(
+        "result = df['Sales'].sum()",
+        ConnectionError("Explanation failed"),
+    )
+
+    out = run_analysis(
+        csv_file,
+        "What are total sales?",
+        explain=True,
+    )
+
+    assert out == {
+        "answer": "375.5",
+        "table": None,
+        "error": None,
+    }

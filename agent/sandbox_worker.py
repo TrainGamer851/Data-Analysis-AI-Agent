@@ -179,14 +179,28 @@ def _worker() -> None:
     out = sys.stdout.buffer
     stdout, code, df = io.StringIO(), "", None
     try:
-        payload = pickle.load(sys.stdin.buffer)  # the payload that was written by parent
-        code, df = payload["code"], payload["df"] # Extract payload now!!!
-        os.environ.clear() # clean the env that we created for test run
+        payload = pickle.load(sys.stdin.buffer)
+        code, df = payload["code"], payload["df"]
+
+        # Preserve the Windows system directory required by SSL.
+        system_root = os.environ.get("SYSTEMROOT") if os.name == "nt" else None
+
+        # Remove environment variables to prevent credential exposure.
+        os.environ.clear()
+
+        if system_root:
+            os.environ["SYSTEMROOT"] = system_root
+
         _limit_memory(payload["memory_mb"])
-        _install_audit_hook()  # last step before running LLM code -> Lock all dangerous commands :)
+        _install_audit_hook()
         outcome = _run(code, df, stdout, payload["max_rows"])
-    except BaseException as exc:  # includes MemoryError and SystemExit
-        outcome = _fail(_format_error(exc, code, df), stdout.getvalue()[:MAX_STDOUT])
+
+    except BaseException as exc:
+        outcome = _fail(
+            _format_error(exc, code, df),
+            stdout.getvalue()[:MAX_STDOUT],
+        )
+
     out.write(json.dumps(outcome, default=str).encode("utf-8") + b"\n")
     out.flush()
 

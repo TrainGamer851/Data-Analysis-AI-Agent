@@ -221,31 +221,53 @@ def test_ollama_client_creation(monkeypatch):
 
 
 def test_ollama_generate_response(monkeypatch):
-    # Set up environment variables for the Ollama provider and mock the client.
-    """The selected Ollama model should receive the messages."""
+    """Verify the native Ollama API receives the correct request."""
     from unittest.mock import MagicMock, patch
     from agent.llm_client import generate_response
 
-    # Configure Ollama and create a mocked client to avoid network access.
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3:4b")
-    # Create a mock client to simulate the Ollama API response.
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value.choices = [
-        MagicMock(message=MagicMock(content="Hello from Ollama"))
-    ]
-    # Keep the input messages so the mock call can be checked exactly.
-    messages = [{"role": "user", "content": "Say hello"}]
-    # Patch the get_client function to return the mocked client during the test.
-    with patch("agent.llm_client.get_client", return_value=mock_client):
-        result = generate_response(messages)
-    # Ensure the result matches the mocked response content.
-    assert result == "Hello from Ollama"
-    # Verify that the mocked client's create method was called with the correct parameters.
-    mock_client.chat.completions.create.assert_called_once_with(
-        model="qwen3:4b",
-        messages=messages,
+    monkeypatch.setenv(
+        "OLLAMA_API_BASE",
+        "http://localhost:11434/v1",
     )
+
+    messages = [
+        {"role": "user", "content": "Say hello"}
+    ]
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "message": {
+            "content": "Hello from Ollama"
+        },
+        "done_reason": "stop",
+    }
+
+    with patch(
+        "agent.llm_client.requests.post",
+        return_value=mock_response,
+    ) as mock_post:
+        result = generate_response(messages)
+
+    assert result == "Hello from Ollama"
+
+    mock_post.assert_called_once_with(
+        "http://localhost:11434/api/chat",
+        json={
+            "model": "qwen3:4b",
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": {
+                "num_predict": 768,
+                "temperature": 0,
+            },
+        },
+        timeout=120,
+    )
+
+    mock_response.raise_for_status.assert_called_once()
 
 
 def test_switch_from_ollama_to_nrp(monkeypatch):
