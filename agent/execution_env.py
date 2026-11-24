@@ -144,13 +144,27 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         return _fail("Execution Error: the dataset DataFrame is empty or None.")
 
     docker = os.environ.get("SANDBOX_BACKEND", "local").lower() == "docker"
-    name = f"sandbox-{uuid.uuid4().hex[:12]}" # Tracking this docker env
+
+    job_id = os.environ.get("ANALYSIS_JOB_ID", "")
+
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        job_id = ""
+
+    if job_id:
+        name = f"sandbox-{job_id}-{uuid.uuid4().hex[:12]}"
+    else:
+        name = f"sandbox-{uuid.uuid4().hex[:12]}"
 
     if docker:
         error = prepare_sandbox()
         if error:
             return _fail(error)
-        cmd = _docker_base(name, memory_mb) + [IMAGE, "python", "-I", "/app/sandbox_worker.py"]
+        cmd = _docker_base(name, memory_mb)
+
+        if job_id:
+            cmd += ["--label", f"data-analysis-job={job_id}"]
+
+        cmd += [IMAGE, "python", "-I", "/app/sandbox_worker.py"]
         env = None  # the docker client needs PATH etc.; the container only gets the -e flags
     else:
         cmd = [sys.executable, "-I", _WORKER]

@@ -265,3 +265,152 @@ def test_missing_dataset_resets_chat():
     assert csv_path is None
     assert history == []
     assert status == "Please upload a CSV file first."
+
+# ------------------------------------------------------------
+# Frontend cancellation tests
+# ------------------------------------------------------------
+
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import app.app as frontend
+
+
+def test_controlled_message_success():
+    request = SimpleNamespace(
+        session_hash="test-success"
+    )
+
+    with patch.object(
+        frontend,
+        "analyze_question",
+        return_value="Total sales: 300.00",
+    ):
+        updates = list(
+            frontend.send_controlled_message(
+                "What are total sales?",
+                [],
+                "orders.csv",
+                request,
+            )
+        )
+
+    history = updates[-1][0]
+
+    assert history[0]["role"] == "user"
+    assert history[1]["role"] == "assistant"
+    assert history[1]["content"] == "Total sales: 300.00"
+    assert request.session_hash not in frontend._active_jobs
+
+
+def test_controlled_message_cancellation():
+    request = SimpleNamespace(
+        session_hash="test-cancellation"
+    )
+
+    def fake_analysis(question, csv_path, job=None):
+        frontend.cancel_active_analysis(request)
+
+        assert job.cancelled is True
+
+        return "This result should not appear."
+
+    with patch.object(
+        frontend,
+        "analyze_question",
+        side_effect=fake_analysis,
+    ):
+        updates = list(
+            frontend.send_controlled_message(
+                "Analyze business performance",
+                [],
+                "orders.csv",
+                request,
+            )
+        )
+
+    history = updates[-1][0]
+
+    assert history[-1]["content"] == "Analysis stopped."
+    assert request.session_hash not in frontend._active_jobs
+
+
+def test_cancellation_is_session_specific():
+    first_request = SimpleNamespace(
+        session_hash="test-session-one"
+    )
+
+    second_request = SimpleNamespace(
+        session_hash="test-session-two"
+    )
+
+    first_job = frontend.AnalysisJob()
+    second_job = frontend.AnalysisJob()
+
+    with frontend._jobs_lock:
+        frontend._active_jobs[first_request.session_hash] = first_job
+        frontend._active_jobs[second_request.session_hash] = second_job
+
+    try:
+        frontend.cancel_active_analysis(first_request)
+
+        assert first_job.cancelled is True
+        assert second_job.cancelled is False
+
+    finally:
+        with frontend._jobs_lock:
+            frontend._active_jobs.pop(
+                first_request.session_hash, None
+            )
+            frontend._active_jobs.pop(
+                second_request.session_hash, None
+            )
+
+
+def test_cancel_without_active_job():
+    request = SimpleNamespace(
+        session_hash="test-no-active-job"
+    )
+
+    frontend.cancel_active_analysis(request)
+
+    assert request.session_hash not in frontend._active_jobs
+
+
+def test_controlled_message_rejects_duplicate_job():
+    request = SimpleNamespace(
+        session_hash="test-duplicate-job"
+    )
+
+    existing_job = frontend.AnalysisJob()
+
+    with frontend._jobs_lock:
+        frontend._active_jobs[request.session_hash] = existing_job
+
+    try:
+        with patch.object(
+            frontend,
+            "analyze_question",
+        ) as mock_analysis:
+            updates = list(
+                frontend.send_controlled_message(
+                    "Another question",
+                    [],
+                    "orders.csv",
+                    request,
+                )
+            )
+
+        assert updates == []
+        mock_analysis.assert_not_called()
+
+        assert (
+            frontend._active_jobs[request.session_hash]
+            is existing_job
+        )
+
+    finally:
+        with frontend._jobs_lock:
+            frontend._active_jobs.pop(
+                request.session_hash, None
+            )

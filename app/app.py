@@ -1,7 +1,13 @@
 import gradio as gr
 import pandas as pd
+import threading
+
 from pathlib import Path
 from agent.agent_runner import run_analysis
+from agent.analysis_controller import (
+    AnalysisJob,
+    run_controlled_analysis,
+)
 
 # ----------------------------------
 # Business dashboard theme
@@ -148,7 +154,7 @@ def load_csv(file_path):
 # ----------------------------------
 
 
-def analyze_question(question, csv_path):
+def analyze_question(question, csv_path, job=None):
     if not csv_path:
         return "Please upload a CSV file first."
 
@@ -156,13 +162,24 @@ def analyze_question(question, csv_path):
         return "Please enter a question about your dataset."
 
     try:
-        response = run_analysis(
-            csv_path,
-            question,
-            explain=True,
-        )
+        if job is None:
+            response = run_analysis(
+                csv_path,
+                question,
+                explain=True,
+            )
+        else:
+            response = run_controlled_analysis(
+                csv_path,
+                question,
+                job=job,
+                explain=True,
+            )
 
         if response.get("error"):
+            if response["error"] == "Analysis stopped.":
+                return "Analysis stopped."
+
             return f"**Analysis Error:** {response['error']}"
 
         answer = str(response.get("answer") or "No answer returned.")
@@ -188,6 +205,9 @@ def analyze_question(question, csv_path):
 # ----------------------------------
 
 
+_active_jobs = {}
+_jobs_lock = threading.Lock()
+
 def send_message(question, history, csv_path):
     history = list(history or [])
 
@@ -204,6 +224,74 @@ def send_message(question, history, csv_path):
 
     return history, ""
 
+def send_controlled_message(
+    question,
+    history,
+    csv_path,
+    request: gr.Request,
+):
+    history = list(history or [])
+
+    if not question or not question.strip():
+        yield history, "", *stop_processing()
+        return
+
+    question = question.strip()
+    session_id = request.session_hash
+
+    job = AnalysisJob()
+
+    with _jobs_lock:
+        if session_id in _active_jobs:
+            return
+
+        _active_jobs[session_id] = job
+
+    try:
+        history.append({
+            "role": "user",
+            "content": question,
+        })
+
+        # Display the question immediately and show Stop.
+        yield list(history), "", *start_processing()
+
+        answer = analyze_question(
+            question,
+            csv_path,
+            job=job,
+        )
+
+        if job.cancelled:
+            answer = "Analysis stopped."
+
+        history.append({
+            "role": "assistant",
+            "content": answer,
+        })
+
+        # Keep controls disabled until the job is removed.
+        yield list(history), "", *start_processing()
+
+    finally:
+        job.cancel()
+
+        with _jobs_lock:
+            if _active_jobs.get(session_id) is job:
+                _active_jobs.pop(session_id, None)
+
+    # Restore controls after analysis and cleanup finish.
+    yield list(history), "", *stop_processing()
+
+
+def cancel_active_analysis(request: gr.Request):
+    session_id = request.session_hash
+
+    with _jobs_lock:
+        job = _active_jobs.get(session_id)
+
+        if job is not None:
+            job.cancel()
 
 def load_csv_and_reset_chat(file_path):
     preview, status, rows, columns, csv_path = load_csv(file_path)
@@ -332,42 +420,36 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
         clear_button,
     ]
 
-    # Start analysis by clicking Send or pressing Enter.
-    start_event = gr.on(
+    # Start a cancellable analysis using Send or Enter.
+    analysis_event = gr.on(
         triggers=[
             send_button.click,
             question_input.submit,
         ],
-        fn=start_processing,
-        inputs=None,
-        outputs=processing_controls,
-        queue=False,
-    )
-
-    # Run the business analysis.
-    analysis_event = start_event.then(
-        fn=send_message,
-        inputs=[question_input, chatbot, dataset_state],
-        outputs=[chatbot, question_input],
+        fn=send_controlled_message,
+        inputs=[
+            question_input,
+            chatbot,
+            dataset_state,
+        ],
+        outputs=[
+            chatbot,
+            question_input,
+            *processing_controls,
+        ],
         show_progress="minimal",
+        concurrency_limit=None,
+        trigger_mode="once",
     )
 
-    # Restore controls when analysis finishes.
-    analysis_event.then(
-        fn=stop_processing,
-        inputs=None,
-        outputs=processing_controls,
-        queue=False,
-    )
-
-    # Stop the pending analysis and restore controls.
+    # Signal the controller to terminate the active analysis.
     stop_button.click(
-        fn=stop_processing,
+        fn=cancel_active_analysis,
         inputs=None,
-        outputs=processing_controls,
-        cancels=[analysis_event],
+        outputs=None,
         queue=False,
     )
+
     clear_button.click(fn=lambda: [], outputs=[chatbot])
 
 
