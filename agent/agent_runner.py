@@ -4,6 +4,8 @@ from agent.execution_env import execute_code
 from agent.llm_client import generate_response, get_model_config
 from minisweagent.agents.default import DefaultAgent
 from minisweagent.exceptions import FormatError
+from agent.execution_env import execute_code
+from agent.business_metrics import try_business_analysis
 
 import logging
 import os
@@ -276,7 +278,17 @@ def run_analysis(csv_file: str, question: str, explain: bool = True):
         return error_response("The analysis service is busy. Please try again in a moment.")
 
     try:
+        if explain:
+            fast_result = try_business_analysis(
+                df,
+                question,
+            )
+
+            if fast_result is not None:
+                return fast_result
+
         return run_agent(df, question, explain)
+
     finally:
         _SLOTS.release()
 
