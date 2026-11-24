@@ -8,6 +8,7 @@ from agent.analysis_controller import (
     AnalysisJob,
     run_controlled_analysis,
 )
+from app.table_formatter import business_table_to_markdown
 
 # ----------------------------------
 # Business dashboard theme
@@ -189,9 +190,8 @@ def analyze_question(question, csv_path, job=None):
             result_df = pd.DataFrame(table)
 
             answer += "\n\n### Supporting Data\n\n"
-            answer += result_df.to_markdown(
-                index=False,
-                floatfmt=",.2f",
+            answer += business_table_to_markdown(
+                result_df
             )
 
         return answer
