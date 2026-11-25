@@ -742,3 +742,415 @@ def test_structured_table_row_limit():
     )
 
     assert "Showing 200 of 250" in answer
+
+
+
+def test_correlation_table_direct_answer():
+    last = {
+        "result": [
+            {
+                "Category": "Furniture",
+                "Discount_Profit_Correlation": -0.4782,
+            },
+        ],
+        "result_type": "table",
+    }
+
+    answer = runner.describe_plainly(last)
+
+    assert "The analysis returned 1 row(s)." in answer
+    assert "Correlation does not establish causation." in answer
+
+
+def test_correlation_explanation_adds_disclaimer(
+    fake_llm,
+):
+    fake_llm(
+        "Discount and profit have a negative association."
+    )
+
+    last = {
+        "result": [
+            {
+                "Category": "Furniture",
+                "Discount_Profit_Correlation": -0.4782,
+            },
+        ],
+        "result_type": "table",
+    }
+
+    answer = runner.explain_result(
+        "Analyze discount and profit.",
+        last,
+        runner.describe_plainly(last),
+    )
+
+    assert "negative association" in answer
+    assert "Correlation does not establish causation." in answer
+
+
+def test_correlation_disclaimer_not_duplicated(
+    fake_llm,
+):
+    fake_llm(
+        "Discount and profit are negatively associated. "
+        "Correlation does not establish causation."
+    )
+
+    last = {
+        "result": [
+            {
+                "Discount_Profit_Correlation": -0.4782,
+            },
+        ],
+        "result_type": "table",
+    }
+
+    answer = runner.explain_result(
+        "Analyze discount and profit.",
+        last,
+        runner.describe_plainly(last),
+    )
+
+    assert answer.count(
+        "Correlation does not establish causation."
+    ) == 1
+
+
+def test_correlation_explanation_failure_preserves_disclaimer(
+    fake_llm,
+):
+    fake_llm(
+        TimeoutError("Explanation timed out")
+    )
+
+    last = {
+        "result": [
+            {
+                "Discount_Profit_Correlation": -0.4782,
+            },
+        ],
+        "result_type": "table",
+    }
+
+    plain_answer = runner.describe_plainly(last)
+
+    answer = runner.explain_result(
+        "Analyze discount and profit.",
+        last,
+        plain_answer,
+    )
+
+    assert answer == plain_answer
+    assert "Correlation does not establish causation." in answer
+
+
+def test_non_correlation_table_has_no_disclaimer():
+    last = {
+        "result": [
+            {
+                "Region": "West",
+                "Total_Sales": 150.0,
+            },
+        ],
+        "result_type": "table",
+    }
+
+    answer = runner.describe_plainly(last)
+
+    assert answer == "The analysis returned 1 row(s)."
+    assert "causation" not in answer.lower()
+
+
+
+def test_single_group_financial_summary():
+    from agent.result_formatter import (
+        summarize_financial_table,
+    )
+
+    records = [
+        {
+            "Product": "Product A",
+            "Total_Sales": 1500.0,
+            "Total_Profit": -150.0,
+            "Profit_Margin_Pct": -10.0,
+            "Average_Group_Sales": 1000.0,
+        },
+    ]
+
+    answer = summarize_financial_table(records)
+
+    assert answer is not None
+    assert "Product A" in answer
+    assert "$1,500.00" in answer
+    assert "-$150.00" in answer
+    assert "-10.00%" in answer
+    assert "$1,000.00" in answer
+    assert "negative total profit" in answer
+
+
+def test_discount_relationship_summary():
+    from agent.result_formatter import (
+        summarize_financial_table,
+    )
+
+    records = [
+        {
+            "Category": "Category A",
+            "Average_Discount_Pct": 20.0,
+            "Profit_Margin_Pct": 5.0,
+            "Discount_Profit_Correlation": -0.65,
+        },
+        {
+            "Category": "Category B",
+            "Average_Discount_Pct": 10.0,
+            "Profit_Margin_Pct": 15.0,
+            "Discount_Profit_Correlation": -0.25,
+        },
+    ]
+
+    answer = summarize_financial_table(records)
+
+    assert answer is not None
+    assert "Category A" in answer
+    assert "20.00%" in answer
+    assert "5.00%" in answer
+    assert "-0.6500" in answer
+    assert "negative association" in answer
+    assert (
+        "Correlation does not establish causation."
+        in answer
+    )
+
+
+def test_average_discount_summary():
+    from agent.result_formatter import (
+        summarize_financial_table,
+    )
+
+    records = [
+        {
+            "Region": "North",
+            "Average_Discount_Pct": 12.5,
+        },
+        {
+            "Region": "South",
+            "Average_Discount_Pct": 18.25,
+        },
+    ]
+
+    answer = summarize_financial_table(records)
+
+    assert answer is not None
+    assert "North" in answer
+    assert "South" in answer
+    assert "12.50%" in answer
+    assert "18.25%" in answer
+
+
+def test_average_discount_summary_preserves_ties():
+    from agent.result_formatter import (
+        summarize_financial_table,
+    )
+
+    records = [
+        {
+            "Region": "North",
+            "Average_Discount_Pct": 20.0,
+        },
+        {
+            "Region": "South",
+            "Average_Discount_Pct": 20.0,
+        },
+        {
+            "Region": "East",
+            "Average_Discount_Pct": 10.0,
+        },
+    ]
+
+    answer = summarize_financial_table(records)
+
+    assert answer is not None
+    assert "North" in answer
+    assert "South" in answer
+    assert "East" in answer
+    assert "20.00%" in answer
+
+
+def test_equal_average_discount_summary():
+    from agent.result_formatter import (
+        summarize_financial_table,
+    )
+
+    records = [
+        {
+            "Region": "North",
+            "Average_Discount_Pct": 15.0,
+        },
+        {
+            "Region": "South",
+            "Average_Discount_Pct": 15.0,
+        },
+    ]
+
+    answer = summarize_financial_table(records)
+
+    assert answer is not None
+    assert "same average discount" in answer
+    assert "15.00%" in answer
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [],
+        None,
+        ["North", "South"],
+        [
+            {
+                "Region": "North",
+                "Total_Sales": 100,
+            },
+        ],
+        [
+            {
+                "Region": "North",
+                "Total_Sales": 100,
+                "Total_Profit": None,
+            },
+        ],
+        [
+            {
+                "Region": "North",
+                "Total_Sales": float("inf"),
+                "Total_Profit": 20,
+            },
+        ],
+    ],
+)
+def test_unsupported_financial_summary(records):
+    from agent.result_formatter import (
+        summarize_financial_table,
+    )
+
+    assert summarize_financial_table(records) is None
+
+
+def test_financial_summary_does_not_modify_records():
+    from copy import deepcopy
+
+    from agent.result_formatter import (
+        summarize_financial_table,
+    )
+
+    records = [
+        {
+            "Product": "Product A",
+            "Total_Sales": 1500.0,
+            "Total_Profit": -150.0,
+        },
+    ]
+
+    original = deepcopy(records)
+
+    summarize_financial_table(records)
+
+    assert records == original
+
+
+def test_financial_summary_escapes_group_labels():
+    from agent.result_formatter import (
+        summarize_financial_table,
+    )
+
+    records = [
+        {
+            "Product": "*Product A*",
+            "Total_Sales": 1500.0,
+            "Total_Profit": -150.0,
+        },
+    ]
+
+    answer = summarize_financial_table(records)
+
+    assert r"\*Product A\*" in answer
+
+
+def test_single_group_financial_result_skips_llm(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = df.groupby('Region', as_index=False)"
+        ".agg(Total_Sales=('Sales', 'sum'), "
+        "Total_Profit=('Profit', 'sum'))"
+        ".query('Total_Sales > 175')"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Which regions have sales above 175?",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is not None
+    assert len(out["table"]) == 1
+    assert "East" in out["answer"]
+    assert "$200.00" in out["answer"]
+    assert "$40.00" in out["answer"]
+    assert len(llm.calls) == 1
+
+
+def test_discount_summary_skips_second_llm_request(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = df.groupby('Region', as_index=False)"
+        ".agg(Total_Sales=('Sales', 'sum'), "
+        "Total_Profit=('Profit', 'sum'))\n"
+        "result['Average_Discount_Pct'] = "
+        "result['Total_Sales'] * 0.1\n"
+        "result['Profit_Margin_Pct'] = "
+        "result['Total_Profit'] / "
+        "result['Total_Sales'] * 100\n"
+        "result['Discount_Profit_Correlation'] = -0.5"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Analyze discount and profitability by region.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert len(out["table"]) == 3
+    assert (
+        "Correlation does not establish causation."
+        in out["answer"]
+    )
+    assert len(llm.calls) == 1
+
+
+def test_recommendation_retains_explanation_route(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = df.groupby('Region', as_index=False)"
+        ".agg(Total_Sales=('Sales', 'sum'), "
+        "Total_Profit=('Profit', 'sum'))"
+        ".query('Total_Sales > 175')",
+        "Investigate opportunities to improve performance.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Suggest actions based on detailed regional results.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert len(llm.calls) == 2
+    assert "Investigate opportunities" in out["answer"]

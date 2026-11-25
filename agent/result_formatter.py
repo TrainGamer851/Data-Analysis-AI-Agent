@@ -229,3 +229,318 @@ def describe_record_table(value, table_name, table):
     )
 
     return "\n".join(lines)
+
+
+
+def normalize_metric_name(name):
+    """Normalize calculated column names for comparison."""
+
+    return " ".join(
+        str(name).lower().replace("_", " ").split()
+    )
+
+
+def is_valid_number(value):
+    """Accept only finite numeric calculation results."""
+
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def summarize_financial_table(records):
+    """Summarize supported financial tables without an LLM."""
+
+    debug_log(
+        "DETERMINISTIC SUMMARY",
+        "Inspecting calculated financial table",
+    )
+
+    if not isinstance(records, list) or not records:
+        debug_log(
+            "DETERMINISTIC SUMMARY",
+            "No non-empty table available",
+        )
+
+        return None
+
+    if not all(
+        isinstance(row, dict) and row
+        for row in records
+    ):
+        return None
+
+    columns = list(records[0])
+
+    if not all(
+        set(row) == set(columns)
+        for row in records
+    ):
+        return None
+
+    column_map = {
+        normalize_metric_name(column): column
+        for column in columns
+    }
+
+    if len(column_map) != len(columns):
+        return None
+
+    dimension_columns = [
+        column
+        for column in columns
+        if all(
+            isinstance(row[column], str)
+            and row[column].strip()
+            for row in records
+        )
+    ]
+
+    if len(dimension_columns) != 1:
+        debug_log(
+            "DETERMINISTIC SUMMARY",
+            "No unambiguous grouping column",
+        )
+
+        return None
+
+    dimension = dimension_columns[0]
+
+    if len({
+        row[dimension] for row in records
+    }) != len(records):
+        return None
+
+    def find_metric(*names):
+        for name in names:
+            if name in column_map:
+                return column_map[name]
+
+        return None
+
+    def valid_metric(column):
+        return (
+            column is not None
+            and all(
+                is_valid_number(row[column])
+                for row in records
+            )
+        )
+
+    sales_column = find_metric(
+        "total sales",
+        "sales",
+        "total revenue",
+        "revenue",
+    )
+
+    profit_column = find_metric(
+        "total profit",
+        "profit",
+    )
+
+    margin_column = find_metric(
+        "profit margin pct",
+        "profit margin %",
+        "profit margin percentage",
+    )
+
+    discount_column = find_metric(
+        "average discount pct",
+        "avg discount pct",
+        "average discount %",
+        "average discount percentage",
+    )
+
+    correlation_column = find_metric(
+        "discount profit correlation",
+    )
+
+    def group_name(row):
+        return (
+            f"**{escape_text(row[dimension])}**"
+        )
+
+    def format_metric(row, column):
+        return format_named_value(
+            column,
+            row[column],
+        )
+
+    # Case 1: Discount and profitability relationship.
+    if (
+        valid_metric(discount_column)
+        and valid_metric(margin_column)
+        and valid_metric(correlation_column)
+        and len(records) >= 2
+        and all(
+            -1 <= row[correlation_column] <= 1
+            for row in records
+        )
+    ):
+        highest_discount = max(
+            records,
+            key=lambda row: row[discount_column],
+        )
+
+        lowest_margin = min(
+            records,
+            key=lambda row: row[margin_column],
+        )
+
+        strongest_negative = min(
+            records,
+            key=lambda row: row[correlation_column],
+        )
+
+        lines = [
+            "Among the returned groups:",
+            "",
+            f"- {group_name(highest_discount)} has "
+            "an average discount of "
+            f"**{format_metric(highest_discount, discount_column)}**, "
+            "the highest value shown.",
+            f"- {group_name(lowest_margin)} has "
+            "a profit margin of "
+            f"**{format_metric(lowest_margin, margin_column)}**, "
+            "the lowest value shown.",
+        ]
+
+        if strongest_negative[correlation_column] < 0:
+            lines.append(
+                f"- {group_name(strongest_negative)} has "
+                "the most negative discount-profit "
+                "correlation shown "
+                f"(**{format_metric(strongest_negative, correlation_column)}**)."
+            )
+
+        if all(
+            row[correlation_column] < 0
+            for row in records
+        ):
+            lines.append(
+                "\nAll returned groups show a negative "
+                "association between discount and profit."
+            )
+
+        lines.append(
+            "\n**Note:** Correlation does not "
+            "establish causation."
+        )
+
+        debug_log(
+            "DETERMINISTIC SUMMARY",
+            "Discount-profit relationship summarized",
+        )
+
+        return "\n".join(lines)
+
+    # Case 2: Financial results containing one group.
+    if (
+        len(records) == 1
+        and valid_metric(sales_column)
+        and valid_metric(profit_column)
+    ):
+        row = records[0]
+
+        lines = [
+            f"The calculated result identifies "
+            f"{group_name(row)}.",
+            "",
+            f"- **Total sales/revenue:** "
+            f"{format_metric(row, sales_column)}",
+            f"- **Total profit:** "
+            f"{format_metric(row, profit_column)}",
+        ]
+
+        if valid_metric(margin_column):
+            lines.append(
+                f"- **Profit margin:** "
+                f"{format_metric(row, margin_column)}"
+            )
+
+        threshold_column = find_metric(
+            "average group sales",
+            "average total sales",
+            "average sales threshold",
+            "sales threshold",
+        )
+
+        if valid_metric(threshold_column):
+            lines.append(
+                f"- **Sales comparison threshold:** "
+                f"${row[threshold_column]:,.2f}"
+            )
+
+        if row[profit_column] < 0:
+            lines.append(
+                "\nThe returned group recorded "
+                "a negative total profit."
+            )
+
+        debug_log(
+            "DETERMINISTIC SUMMARY",
+            "Single-group financial result summarized",
+        )
+
+        return "\n".join(lines)
+
+    # Case 3: Average discount comparison.
+    if (
+        valid_metric(discount_column)
+        and len(records) >= 2
+        and len(columns) == 2
+    ):
+        highest = max(
+            row[discount_column]
+            for row in records
+        )
+
+        lowest = min(
+            row[discount_column]
+            for row in records
+        )
+
+        highest_names = ", ".join(
+            group_name(row)
+            for row in records
+            if row[discount_column] == highest
+        )
+
+        lowest_names = ", ".join(
+            group_name(row)
+            for row in records
+            if row[discount_column] == lowest
+        )
+
+        if highest == lowest:
+            answer = (
+                "All returned groups have the same "
+                "average discount of "
+                f"**{highest:.2f}%**."
+            )
+
+        else:
+            answer = (
+                f"{highest_names} recorded the highest "
+                "average discount among the returned "
+                f"groups (**{highest:.2f}%**), while "
+                f"{lowest_names} recorded the lowest "
+                f"(**{lowest:.2f}%**)."
+            )
+
+        debug_log(
+            "DETERMINISTIC SUMMARY",
+            "Average discount comparison summarized",
+        )
+
+        return answer
+
+    debug_log(
+        "DETERMINISTIC SUMMARY",
+        "No supported financial summary pattern",
+    )
+
+    return None

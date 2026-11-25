@@ -20,6 +20,7 @@ from agent.result_formatter import (
     format_named_value,
     extract_record_table,
     describe_record_table,
+    summarize_financial_table,
 )
 from agent.time_budget import (
     AnalysisBudgetExceeded,
@@ -910,10 +911,68 @@ def run_agent(df, question, explain, context=None):
             f"{len(plain_answer)} characters",
         )
 
-    # Structured tables, lists and missing values can be
-    # presented without another model request.
+    # Attempt deterministic interpretation of supported
+    # native financial tables before requesting an explanation.
+    financial_summary = None
+
+    if explain and result_type == "table":
+        summary_timer = DebugTimer(
+            "DETERMINISTIC SUMMARY"
+        )
+
+        debug_log(
+            "DETERMINISTIC SUMMARY",
+            "Checking native table for financial insights",
+        )
+
+        # Preserve the AI explanation route for questions
+        # explicitly requesting recommendations or forecasts.
+        needs_extended_interpretation = bool(
+            re.search(
+                r"\b(recommend\w*|suggest\w*|"
+                r"forecast\w*|predict\w*|why|"
+                r"strateg\w*|advice|should)\b",
+                question.lower(),
+            )
+        )
+
+        if needs_extended_interpretation:
+            debug_log(
+                "DETERMINISTIC SUMMARY",
+                "Extended interpretation requested; "
+                "retaining explanation route",
+            )
+
+        else:
+            financial_summary = (
+                summarize_financial_table(
+                    result_value,
+                )
+            )
+
+        if financial_summary is not None:
+            plain_answer = financial_summary
+
+            summary_timer.finish(
+                "Deterministic financial summary generated"
+            )
+
+            debug_log(
+                "RESULT INTEGRITY",
+                "Financial summary uses calculated values",
+            )
+
+        else:
+            summary_timer.finish(
+                "Deterministic summary unavailable"
+            )
+
+    # Structured tables, supported financial summaries,
+    # lists and missing values can be presented without
+    # another model request.
     direct_result = (
-        structured_table is not None
+        financial_summary is not None
+        or structured_table is not None
         or (
             result_type == "object"
             and isinstance(result_value, list)
@@ -1001,7 +1060,32 @@ def describe_plainly(last):
             f"Table contains {row_count} row(s)",
         )
 
-        return f"The analysis returned {row_count} row(s)."
+        text = f"The analysis returned {row_count} row(s)."
+
+        has_correlation = (
+            isinstance(value, list)
+            and any(
+                isinstance(row, dict)
+                and any(
+                    "correlation" in str(column).lower()
+                    for column in row
+                )
+                for row in value
+            )
+        )
+
+        if has_correlation:
+            text += (
+                "\n\n**Note:** "
+                "Correlation does not establish causation."
+            )
+
+            debug_log(
+                "STATISTICAL ACCURACY",
+                "Correlation disclaimer added to direct result",
+            )
+
+        return text
 
     if value is None:
         debug_log(
@@ -1194,6 +1278,41 @@ def explain_result(
             "RESULT INTEGRITY",
             "Original table retained separately",
         )
+
+        has_correlation = (
+            isinstance(value, list)
+            and any(
+                isinstance(row, dict)
+                and any(
+                    "correlation" in str(column).lower()
+                    for column in row
+                )
+                for row in value
+            )
+        )
+
+        if has_correlation:
+            debug_log(
+                "STATISTICAL ACCURACY",
+                "Correlation metric detected in calculated table",
+            )
+
+            disclaimer = (
+                "Correlation does not establish causation."
+            )
+
+            if disclaimer.lower() not in text.lower():
+                text += "\n\n**Note:** " + disclaimer
+
+                debug_log(
+                    "STATISTICAL ACCURACY",
+                    "Correlation disclaimer appended",
+                )
+            else:
+                debug_log(
+                    "STATISTICAL ACCURACY",
+                    "Correlation disclaimer already present",
+                )
 
         return text
 

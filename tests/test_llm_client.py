@@ -562,3 +562,44 @@ def test_ollama_explanation_profile(monkeypatch):
     assert payload["think"] is False
     assert payload["options"]["num_predict"] == 512
     assert payload["options"]["temperature"] == 0.0
+
+
+def test_discount_percentage_prompt_convention():
+    assert "Average_Discount_Pct" in SYSTEM_PROMPT
+    assert "do not multiply again" in SYSTEM_PROMPT
+    assert "percentage points" in SYSTEM_PROMPT
+
+
+def test_correlation_calculation_prompt_rules():
+    assert "paired valid observations" in SYSTEM_PROMPT
+    assert "zero variance" in SYSTEM_PROMPT
+    assert (
+        "Never replace an undefined correlation with zero."
+        in SYSTEM_PROMPT
+    )
+
+
+def test_explanation_prevents_causal_claims():
+    from agent.prompts import EXPLANATION_PROMPT
+
+    assert (
+        "Do not infer causation from correlation."
+        in EXPLANATION_PROMPT
+    )
+
+    assert (
+        "Correlation does not establish causation."
+        in EXPLANATION_PROMPT
+    )
+
+    assert (
+        "Do not claim an overall correlation"
+        in EXPLANATION_PROMPT
+    )
+
+
+def test_recommendations_acknowledge_uncertainty():
+    from agent.prompts import EXPLANATION_PROMPT
+
+    assert "hypotheses" in EXPLANATION_PROMPT
+    assert "not guaranteed improvements" in EXPLANATION_PROMPT

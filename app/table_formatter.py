@@ -101,6 +101,16 @@ def get_column_type(column):
     if "correlation" in name:
         return "correlation"
 
+    if name in {
+        "discount",
+        "avg discount",
+        "average discount",
+        "mean discount",
+        "discount ratio",
+        "average discount ratio",
+    }:
+        return "discount_value"
+
     if name in MONEY_COLUMNS:
         return "money"
 
@@ -145,6 +155,9 @@ def format_value(value, column_type):
 
     if column_type == "correlation":
         return f"{value:.4f}"
+
+    if column_type == "discount_value":
+        return f"{value:,.4f}"
 
     if column_type == "count":
         if float(value).is_integer():

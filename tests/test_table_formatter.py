@@ -254,3 +254,74 @@ def test_markdown_table_removes_cell_line_breaks():
     markdown = business_table_to_markdown(df)
 
     assert "Office Supplies" in markdown
+
+
+def test_ambiguous_discount_preserves_precision():
+    df = pd.DataFrame({
+        "Avg_Discount": [0.173, 0.1563, 0.1315],
+    })
+
+    result = format_business_table(df)
+
+    assert result["Avg_Discount"].tolist() == [
+        "0.1730",
+        "0.1563",
+        "0.1315",
+    ]
+
+
+def test_explicit_discount_percentage_formatting():
+    df = pd.DataFrame({
+        "Average_Discount_Pct": [
+            17.30,
+            15.63,
+            13.15,
+        ],
+    })
+
+    result = format_business_table(df)
+
+    assert result["Average_Discount_Pct"].tolist() == [
+        "17.30%",
+        "15.63%",
+        "13.15%",
+    ]
+
+
+def test_small_discount_percentage_not_multiplied():
+    df = pd.DataFrame({
+        "Discount_Pct": [0.5],
+    })
+
+    result = format_business_table(df)
+
+    assert result["Discount_Pct"].iloc[0] == "0.50%"
+
+
+def test_discount_and_correlation_markdown():
+    df = pd.DataFrame({
+        "Category": ["Furniture"],
+        "Average_Discount_Pct": [17.30],
+        "Profit_Margin_Pct": [2.6141],
+        "Discount_Profit_Correlation": [-0.4782],
+    })
+
+    markdown = business_table_to_markdown(df)
+
+    assert "Average Discount %" in markdown
+    assert "17.30%" in markdown
+    assert "2.61%" in markdown
+    assert "-0.4782" in markdown
+
+
+def test_discount_formatting_preserves_original_data():
+    df = pd.DataFrame({
+        "Avg_Discount": [0.173],
+        "Average_Discount_Pct": [17.30],
+    })
+
+    original = df.copy(deep=True)
+
+    format_business_table(df)
+
+    pd.testing.assert_frame_equal(df, original)
