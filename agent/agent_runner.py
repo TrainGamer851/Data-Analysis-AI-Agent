@@ -6,6 +6,7 @@ from minisweagent.agents.default import DefaultAgent
 from minisweagent.exceptions import FormatError
 from agent.execution_env import execute_code
 from agent.business_metrics import try_business_analysis
+from agent.annual_metrics import try_annual_analysis
 
 import logging
 import os
@@ -286,6 +287,14 @@ def run_analysis(csv_file: str, question: str, explain: bool = True):
 
             if fast_result is not None:
                 return fast_result
+
+            annual_result = try_annual_analysis(
+                df,
+                question,
+            )
+
+            if annual_result is not None:
+                return annual_result
 
         return run_agent(df, question, explain)
 
