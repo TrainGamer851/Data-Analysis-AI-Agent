@@ -290,3 +290,275 @@ def test_switch_from_ollama_to_nrp(monkeypatch):
     assert nrp_config["provider"] == "nrp"
     assert nrp_config["model"] == "qwen3"
     assert nrp_config["api_key"] == "fake-test-key"
+
+
+def test_nrp_custom_request_timeout(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "nrp")
+    monkeypatch.setenv("NRP_API_KEY", "fake-test-key")
+    monkeypatch.delenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        raising=False,
+    )
+
+    mock_client = MagicMock()
+
+    mock_client.chat.completions.create.return_value \
+        .choices[0].message.content = "result = 100"
+
+    with patch(
+        "agent.llm_client.get_client",
+        return_value=mock_client,
+    ):
+        response = generate_response(
+            [{"role": "user", "content": "Calculate sales"}],
+            timeout=30,
+        )
+
+    assert response == "result = 100"
+
+    assert (
+        mock_client.chat.completions.create
+        .call_args.kwargs["timeout"] == 30
+    )
+
+
+def test_ollama_custom_request_timeout(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.delenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        raising=False,
+    )
+
+    mock_response = MagicMock()
+
+    mock_response.json.return_value = {
+        "message": {"content": "result = 100"},
+        "done_reason": "stop",
+    }
+
+    with patch(
+        "agent.llm_client.requests.post",
+        return_value=mock_response,
+    ) as mock_post:
+
+        response = generate_response(
+            [{"role": "user", "content": "Calculate sales"}],
+            timeout=20,
+        )
+
+    assert response == "result = 100"
+    assert mock_post.call_args.kwargs["timeout"] == 20
+
+
+def test_expired_budget_prevents_network_request(
+    monkeypatch,
+):
+    from agent.time_budget import AnalysisBudgetExceeded
+
+    monkeypatch.setenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        "0",
+    )
+
+    with patch(
+        "agent.llm_client.get_client"
+    ) as mock_client:
+
+        with pytest.raises(AnalysisBudgetExceeded):
+            generate_response(
+                [{"role": "user", "content": "Calculate sales"}]
+            )
+
+    mock_client.assert_not_called()
+
+# ---------------------------------------------------------
+# LLM inference optimization tests
+# ---------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "purpose,expected_tokens",
+    [
+        ("default", 768),
+        ("code", 1024),
+        ("explanation", 512),
+    ],
+)
+def test_generation_profiles(purpose, expected_tokens):
+    from agent.llm_client import get_generation_settings
+
+    settings = get_generation_settings(purpose)
+
+    assert settings["max_tokens"] == expected_tokens
+    assert settings["temperature"] == 0.0
+
+
+def test_invalid_generation_profile():
+    from agent.llm_client import get_generation_settings
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported generation purpose",
+    ):
+        get_generation_settings("invalid")
+
+
+@pytest.mark.parametrize(
+    "purpose,expected_tokens",
+    [
+        ("code", 1024),
+        ("explanation", 512),
+    ],
+)
+def test_nrp_generation_settings(
+    monkeypatch,
+    purpose,
+    expected_tokens,
+):
+    monkeypatch.setenv("LLM_PROVIDER", "nrp")
+    monkeypatch.setenv("NRP_API_KEY", "fake-test-key")
+    monkeypatch.setenv("NRP_MODEL", "qwen3")
+    monkeypatch.setenv("NRP_DISABLE_THINKING", "0")
+
+    monkeypatch.delenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        raising=False,
+    )
+
+    mock_client = MagicMock()
+
+    mock_client.chat.completions.create.return_value \
+        .choices[0].message.content = "result = 100"
+
+    with patch(
+        "agent.llm_client.get_client",
+        return_value=mock_client,
+    ):
+        result = generate_response(
+            [{"role": "user", "content": "Calculate sales"}],
+            purpose=purpose,
+            timeout=30,
+        )
+
+    options = (
+        mock_client.chat.completions.create
+        .call_args.kwargs
+    )
+
+    assert result == "result = 100"
+    assert options["max_tokens"] == expected_tokens
+    assert options["temperature"] == 0.0
+    assert options["timeout"] == 30
+    assert "extra_body" not in options
+
+
+def test_nrp_disable_thinking(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "nrp")
+    monkeypatch.setenv("NRP_API_KEY", "fake-test-key")
+    monkeypatch.setenv("NRP_MODEL", "qwen3")
+    monkeypatch.setenv("NRP_DISABLE_THINKING", "1")
+
+    monkeypatch.delenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        raising=False,
+    )
+
+    mock_client = MagicMock()
+
+    mock_client.chat.completions.create.return_value \
+        .choices[0].message.content = "result = 100"
+
+    with patch(
+        "agent.llm_client.get_client",
+        return_value=mock_client,
+    ):
+        generate_response(
+            [{"role": "user", "content": "Calculate sales"}],
+            purpose="code",
+        )
+
+    options = (
+        mock_client.chat.completions.create
+        .call_args.kwargs
+    )
+
+    assert options["extra_body"] == {
+        "chat_template_kwargs": {
+            "enable_thinking": False,
+        }
+    }
+
+
+def test_non_qwen_model_ignores_thinking_setting(
+    monkeypatch,
+):
+    from agent.llm_client import get_nrp_extra_body
+
+    monkeypatch.setenv("NRP_DISABLE_THINKING", "1")
+
+    assert get_nrp_extra_body("another-model") == {}
+
+
+def test_nrp_truncated_code_is_discarded(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "nrp")
+    monkeypatch.setenv("NRP_API_KEY", "fake-test-key")
+    monkeypatch.setenv("NRP_DISABLE_THINKING", "0")
+
+    monkeypatch.delenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        raising=False,
+    )
+
+    mock_client = MagicMock()
+
+    choice = (
+        mock_client.chat.completions.create
+        .return_value.choices[0]
+    )
+
+    choice.message.content = "result = df.groupby("
+    choice.finish_reason = "length"
+
+    with patch(
+        "agent.llm_client.get_client",
+        return_value=mock_client,
+    ):
+        result = generate_response(
+            [{"role": "user", "content": "Group sales"}],
+            purpose="code",
+        )
+
+    assert result == ""
+
+
+def test_ollama_explanation_profile(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+
+    monkeypatch.delenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        raising=False,
+    )
+
+    mock_response = MagicMock()
+
+    mock_response.json.return_value = {
+        "message": {
+            "content": "Total sales are $100."
+        },
+        "done_reason": "stop",
+    }
+
+    with patch(
+        "agent.llm_client.requests.post",
+        return_value=mock_response,
+    ) as mock_post:
+        result = generate_response(
+            [{"role": "user", "content": "Explain sales"}],
+            purpose="explanation",
+        )
+
+    payload = mock_post.call_args.kwargs["json"]
+
+    assert result == "Total sales are $100."
+    assert payload["think"] is False
+    assert payload["options"]["num_predict"] == 512
+    assert payload["options"]["temperature"] == 0.0

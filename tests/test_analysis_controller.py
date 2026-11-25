@@ -458,3 +458,145 @@ def test_docker_cleanup_called_after_cancellation(
     assert not thread.is_alive()
     assert results[0]["error"] == "Analysis stopped."
     assert cleaned_jobs == [job.job_id]
+
+def test_context_serialized_to_worker(
+    monkeypatch,
+    fake_worker,
+    csv_file,
+):
+    captured = {}
+
+    original_popen = controller.subprocess.Popen
+
+    def inspect_request(args, **kwargs):
+        if "agent.analysis_controller" in args:
+            request_path = Path(args[-2])
+
+            captured.update(
+                json.loads(
+                    request_path.read_text(
+                        encoding="utf-8"
+                    )
+                )
+            )
+
+        return original_popen(args, **kwargs)
+
+    monkeypatch.setattr(
+        controller.subprocess,
+        "Popen",
+        inspect_request,
+    )
+
+    context = [
+        {
+            "role": "user",
+            "content": "Show total sales.",
+        },
+        {
+            "role": "assistant",
+            "content": "Total sales are $300.",
+        },
+    ]
+
+    result = run_controlled_analysis(
+        csv_file,
+        "What about profit?",
+        timeout=10,
+        context=context,
+    )
+
+    assert result["error"] is None
+    assert captured["question"] == "What about profit?"
+    assert captured["context"] == context
+
+
+def test_worker_forwards_context(monkeypatch, tmp_path):
+    import agent.agent_runner as runner
+
+    captured = {}
+
+    def fake_analysis(csv_path, question, **kwargs):
+        captured.update(kwargs)
+
+        return {
+            "answer": "Profit is $100.",
+            "table": None,
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        runner,
+        "run_analysis",
+        fake_analysis,
+    )
+
+    request_path = tmp_path / "request.json"
+    result_path = tmp_path / "result.json"
+
+    context = [
+        {
+            "role": "user",
+            "content": "Show total sales.",
+        },
+        {
+            "role": "assistant",
+            "content": "Sales are $300.",
+        },
+    ]
+
+    request_path.write_text(
+        json.dumps({
+            "csv_path": "orders.csv",
+            "question": "What about profit?",
+            "explain": True,
+            "context": context,
+        }),
+        encoding="utf-8",
+    )
+
+    controller._worker(
+        request_path,
+        result_path,
+    )
+
+    assert captured["context"] == context
+    assert result_path.exists()
+
+
+def test_controller_passes_deadline_to_worker(
+    fake_worker,
+    csv_file,
+    monkeypatch,
+):
+    from agent.time_budget import DEADLINE_ENV
+
+    original_popen = controller.subprocess.Popen
+    captured = {}
+
+    def capture_popen(args, **kwargs):
+        if "agent.analysis_controller" in args:
+            captured.update(kwargs["env"])
+
+        return original_popen(args, **kwargs)
+
+    monkeypatch.setattr(
+        controller.subprocess,
+        "Popen",
+        capture_popen,
+    )
+
+    start = time.monotonic()
+
+    result = run_controlled_analysis(
+        csv_file,
+        "What are total sales?",
+        timeout=10,
+    )
+
+    assert result["error"] is None
+    assert DEADLINE_ENV in captured
+
+    deadline = float(captured[DEADLINE_ENV])
+
+    assert start < deadline <= time.monotonic() + 10

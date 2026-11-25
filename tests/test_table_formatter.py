@@ -209,3 +209,48 @@ def test_header_cleanup_preserves_original_dataframe():
     business_table_to_markdown(df)
 
     pd.testing.assert_frame_equal(df, original)
+
+
+def test_correlation_precision():
+    df = pd.DataFrame({
+        "Discount_Profit_Correlation": [-0.4782],
+    })
+
+    result = format_business_table(df)
+
+    assert (
+        result["Discount_Profit_Correlation"].iloc[0]
+        == "-0.4782"
+    )
+
+
+def test_fractional_discount_not_guessed_as_percentage():
+    df = pd.DataFrame({
+        "Avg_Discount": [0.173],
+    })
+
+    result = format_business_table(df)
+
+    assert "%" not in result["Avg_Discount"].iloc[0]
+
+
+def test_markdown_table_escapes_pipe_characters():
+    df = pd.DataFrame({
+        "Category": ["Furniture | Office"],
+        "Sales": [1000],
+    })
+
+    markdown = business_table_to_markdown(df)
+
+    assert r"Furniture \| Office" in markdown
+
+
+def test_markdown_table_removes_cell_line_breaks():
+    df = pd.DataFrame({
+        "Category": ["Office\nSupplies"],
+        "Sales": [1000],
+    })
+
+    markdown = business_table_to_markdown(df)
+
+    assert "Office Supplies" in markdown

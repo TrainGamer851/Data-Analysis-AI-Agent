@@ -136,3 +136,60 @@ def test_parent_df_not_mutated(df):
     before = df.copy()
     execute_code("df.drop(df.index, inplace=True)\nresult = 1", df)
     pd.testing.assert_frame_equal(df, before)
+
+# ---------------------------------------------------------------------------
+# Structured result serialization
+# ---------------------------------------------------------------------------
+
+def test_list_result_type(df):
+    out = execute_code(
+        "result = df['Region'].unique().tolist()",
+        df,
+    )
+
+    assert out["success"]
+    assert out["result_type"] == "object"
+    assert out["result"] == [
+        "West",
+        "East",
+        "South",
+    ]
+
+
+def test_dictionary_result_type(df):
+    out = execute_code(
+        "result = {'Total Sales': df['Sales'].sum(), "
+        "'Rows': len(df)}",
+        df,
+    )
+
+    assert out["success"]
+    assert out["result_type"] == "object"
+    assert out["result"] == {
+        "Total Sales": 350.5,
+        "Rows": 4,
+    }
+
+
+def test_empty_list_serialization(df):
+    out = execute_code("result = []", df)
+
+    assert out["success"]
+    assert out["result_type"] == "object"
+    assert out["result"] == []
+
+
+def test_empty_dictionary_serialization(df):
+    out = execute_code("result = {}", df)
+
+    assert out["success"]
+    assert out["result_type"] == "object"
+    assert out["result"] == {}
+
+
+def test_null_result_serialization(df):
+    out = execute_code("result = None", df)
+
+    assert out["success"]
+    assert out["result_type"] == "scalar"
+    assert out["result"] is None

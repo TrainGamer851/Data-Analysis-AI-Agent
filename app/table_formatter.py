@@ -1,5 +1,3 @@
-"""Deterministic display formatting for business data tables."""
-
 import math
 import re
 from numbers import Real, Integral
@@ -100,6 +98,9 @@ def get_column_type(column):
     ):
         return "percentage"
 
+    if "correlation" in name:
+        return "correlation"
+
     if name in MONEY_COLUMNS:
         return "money"
 
@@ -141,6 +142,9 @@ def format_value(value, column_type):
 
     if column_type == "percentage":
         return f"{value:,.2f}%"
+
+    if column_type == "correlation":
+        return f"{value:.4f}"
 
     if column_type == "count":
         if float(value).is_integer():
@@ -193,12 +197,26 @@ def clean_column_header(column):
 def business_table_to_markdown(df):
     """Convert formatted business data into a Markdown table."""
 
+    def escape_cell(value):
+        text = " ".join(str(value).split())
+
+        return re.sub(
+            r"([\\`*_{}\[\]()<>#+!|~])",
+            r"\\\1",
+            text,
+        )
+
     formatted = format_business_table(df)
 
     formatted.columns = [
-        clean_column_header(column)
+        escape_cell(clean_column_header(column))
         for column in formatted.columns
     ]
+
+    for column in formatted.columns:
+        formatted[column] = formatted[column].map(
+            escape_cell
+        )
 
     return formatted.to_markdown(
         index=False,

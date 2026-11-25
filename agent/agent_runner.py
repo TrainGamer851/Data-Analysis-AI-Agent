@@ -1,24 +1,83 @@
-import pandas as pd
-from agent.prompts import SYSTEM_PROMPT, EXPLANATION_PROMPT, build_analysis_prompt, build_retry_prompt, build_explanation_prompt
-from agent.execution_env import execute_code
-from agent.llm_client import generate_response, get_model_config
-from minisweagent.agents.default import DefaultAgent
-from minisweagent.exceptions import FormatError
-from agent.execution_env import execute_code
-from agent.business_metrics import try_business_analysis
-from agent.annual_metrics import try_annual_analysis
-
+import json
 import logging
 import os
 import re
 import threading
 import traceback
 
+import pandas as pd
+
+from agent.business_metrics import try_business_analysis
+from agent.annual_metrics import try_annual_analysis
+from agent.conversation_context import (
+    build_conversation_context,
+)
+from agent.contextual_metrics import try_contextual_analysis
+from agent.debug_logger import debug_log, DebugTimer
+from agent.result_formatter import (
+    escape_text,
+    readable_label,
+    format_named_value,
+    extract_record_table,
+    describe_record_table,
+)
+from agent.time_budget import (
+    AnalysisBudgetExceeded,
+    remaining_seconds,
+    code_request_timeout,
+    explanation_request_timeout,
+)
+
 logger = logging.getLogger(__name__)
+
+# =========================================
+# LAZY-LOADED AI DEPENDENCIES
+# =========================================
+
+def execute_code(*args, **kwargs):
+    from agent.execution_env import execute_code as implementation
+
+    return implementation(*args, **kwargs)
+
+
+def generate_response(*args, **kwargs):
+    from agent.llm_client import generate_response as implementation
+
+    return implementation(*args, **kwargs)
+
+
+def get_model_config(*args, **kwargs):
+    from agent.llm_client import get_model_config as implementation
+
+    return implementation(*args, **kwargs)
+
+
+def DefaultAgent(*args, **kwargs):
+    from minisweagent.agents.default import DefaultAgent as implementation
+
+    return implementation(*args, **kwargs)
+
+
+def build_analysis_prompt(*args, **kwargs):
+    from agent.prompts import build_analysis_prompt as implementation
+
+    return implementation(*args, **kwargs)
+
+
+def build_retry_prompt(*args, **kwargs):
+    from agent.prompts import build_retry_prompt as implementation
+
+    return implementation(*args, **kwargs)
+
+
+def build_explanation_prompt(*args, **kwargs):
+    from agent.prompts import build_explanation_prompt as implementation
+
+    return implementation(*args, **kwargs)
 
 # NEW Guarding limits, we can change to what we actually want to limit
 MAX_ATTEMPTS = 3                  # model calls (first try + retries) before giving up
-AGENT_TIME_LIMIT_SECONDS = 180    # total time of agent loop
+AGENT_TIME_LIMIT_SECONDS = 120    # total time of agent loop
 MAX_CONCURRENT_RUNS = 2           # analyses running at the same time
 MAX_QUESTION_CHARS = 1000
 MAX_CSV_MB = 50
@@ -48,7 +107,16 @@ _SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_RUNS)
 
 # Small Helpers
 def error_response(message):
-    return {"answer": None, "table": None, "error": message}
+    debug_log(
+        "ERROR",
+        hide_secrets(str(message)),
+    )
+
+    return {
+        "answer": None,
+        "table": None,
+        "error": message,
+    }
 
 def hide_secrets(text): # Stop the Key show
     key = os.environ.get("NRP_API_KEY")
@@ -132,9 +200,56 @@ class DataAnalysisEnvironment:
         self.last = None # Add traceback here...
 
     def execute(self, action: dict, cwd: str = "") -> dict:
-        result = execute_code(action["code"], self.df)
+        timer = DebugTimer("SANDBOX")
+
+        debug_log(
+            "SANDBOX",
+            f"Execution backend: "
+            f"{os.getenv('SANDBOX_BACKEND', 'local')}",
+        )
+
+        debug_log(
+            "SANDBOX",
+            "Submitting generated Python for execution",
+        )
+
+        result = execute_code(
+            action["code"],
+            self.df,
+        )
+
         self.last = result
         error = result["error"] or ""
+
+        if result["success"]:
+            timer.finish("Python execution succeeded")
+
+            debug_log(
+                "RESULT",
+                f"Result type: {result.get('result_type')}",
+            )
+
+            if result.get("result_type") == "table":
+                debug_log(
+                    "RESULT",
+                    f"Returned table rows: "
+                    f"{len(result['result'])}",
+                )
+            else:
+                debug_log(
+                    "RESULT",
+                    hide_secrets(
+                        str(result["result"])
+                    )[:MAX_ANSWER_CHARS],
+                )
+
+        else:
+            timer.finish("Python execution failed")
+
+            debug_log(
+                "SANDBOX ERROR",
+                hide_secrets(error)[:MAX_DETAIL_CHARS],
+            )
 
         return {
             "output": str(result["result"]) if result["success"] else "",
@@ -158,6 +273,12 @@ class QwenModelAdapter:
             self.model_name = get_model_config()["model"]
         except Exception:
             self.model_name = "unknown"
+        self.request_count = 0
+
+        debug_log(
+            "MODEL",
+            f"Model adapter initialized: {self.model_name}",
+        )
 
     def query(self, messages, **kwargs):
         # Send messages to Qwen using our teammate's function.
@@ -167,12 +288,67 @@ class QwenModelAdapter:
             if msg["role"] in ("system", "user", "assistant")
         ]
 
-        reply = generate_response(api_messages)
+        self.request_count += 1
+
+        timer = DebugTimer("MODEL")
+
+        for index, message in enumerate(api_messages, start=1):
+            debug_log(
+                "PROMPT MESSAGE",
+                f"Message {index} | "
+                f"Role: {message['role']} | "
+                f"Characters: {len(message['content']):,}",
+            )
+
+        debug_log(
+            "MODEL",
+            f"Code generation request #{self.request_count}",
+        )
+
+        debug_log(
+            "MODEL",
+            f"Model: {self.model_name} | "
+            f"Messages: {len(api_messages)}",
+        )
+
+        timeout = code_request_timeout()
+
+        debug_log(
+            "BUDGET",
+            f"Code generation request #{self.request_count} | "
+            f"Remaining analysis time: {remaining_seconds():.2f}s | "
+            f"Request timeout: {timeout:.2f}s",
+        )
+
+        reply = generate_response(
+            api_messages,
+            timeout=timeout,
+            purpose="code",
+        )
+
+        timer.finish("Model response received")
 
         code = THINK_BLOCK.sub("", reply or "").strip()
 
+        debug_log(
+            "CODE",
+            f"Generated Python length: {len(code)} characters",
+        )
+
+        debug_log(
+            "CODE",
+            "\n" + hide_secrets(code[:MAX_CODE_CHARS]),
+        )
+
         # Make more clear instruction for the next attempts
         if not code:
+            from minisweagent.exceptions import FormatError
+
+            debug_log(
+                "RETRY",
+                "Model returned no Python code",
+            )
+
             raise FormatError({
                 "role": "user",
                 "content": "Your reply had no Python code. Reply with only Python code "
@@ -181,6 +357,13 @@ class QwenModelAdapter:
             })
         
         if len(code) > MAX_CODE_CHARS:
+            from minisweagent.exceptions import FormatError
+
+            debug_log(
+                "RETRY",
+                "Generated code exceeded allowed length",
+            )
+
             raise FormatError({
                 "role": "user",
                 "content": "Your code is too long. Write a shorter solution.",
@@ -207,6 +390,11 @@ class QwenModelAdapter:
 
         # If the calculation succeeded, finish the task.
         if output["returncode"] == 0:
+            debug_log(
+                "AGENT",
+                "Calculation accepted; ending agent loop",
+            )
+
             return [{
                 "role": "exit",
                 "content": output["output"],
@@ -218,6 +406,11 @@ class QwenModelAdapter:
 
         # If the sandbox fail -> Stop now since it won't help next run
         if output.get("sandbox_broken"):
+            debug_log(
+                "AGENT",
+                "Sandbox unavailable; stopping agent loop",
+            )
+
             return [{
                 "role": "exit",
                 "content": output["exception_info"],
@@ -228,6 +421,11 @@ class QwenModelAdapter:
             }]
 
         # If the calculation failed, ask Qwen to correct its code.
+        debug_log(
+            "RETRY",
+            "Calculation failed; preparing correction prompt",
+        )
+
         return [{
             "role": "user",
             "content": (
@@ -252,41 +450,162 @@ class QwenModelAdapter:
 
 # MAIN AGENT RUNNER
 
-def run_analysis(csv_file: str, question: str, explain: bool = True):
+def run_analysis(
+    csv_file: str,
+    question: str,
+    explain: bool = True,
+    context=None,
+):
+    timer = DebugTimer("RUNNER")
+
+    debug_log(
+        "RUNNER",
+        "Starting analysis pipeline",
+    )
+
     # Step 1: Validate the user's question.
+    debug_log(
+        "VALIDATION",
+        "Validating user question",
+    )
+
     problem = check_question(question)
+
     if problem:
         return error_response(problem)
+
     question = question.strip()
 
+    debug_log(
+        "VALIDATION",
+        f"Question accepted | Characters: {len(question)}",
+    )
+
+    print(
+        f"[CONTEXT DEBUG] Incoming messages: "
+        f"{len(context) if isinstance(context, (list, tuple)) else 0}",
+        flush=True,
+    )
+
+    context = build_conversation_context(context)
+
+    print(
+        f"[CONTEXT DEBUG] Processed messages: {len(context)}",
+        flush=True,
+    )
+
+    print(
+        f"[CONTEXT DEBUG] Question: {question}",
+        flush=True,
+    )
+    
+
     # Step 2: Check and Load the CSV dataset.
+    debug_log(
+        "VALIDATION",
+        "Checking CSV file",
+    )
+
     problem = check_csv_file(csv_file)
+
     if problem:
         return error_response(problem)
+
+    debug_log(
+        "VALIDATION",
+        "CSV file validation passed",
+    )
+
+    dataset_timer = DebugTimer("DATASET")
 
     try:
+        debug_log(
+            "DATASET",
+            "Loading CSV into pandas DataFrame",
+        )
+
         df = load_csv(csv_file)
+
     except Exception as exc:
         log_error("could not read CSV", exc)
-        return error_response("Could not read the CSV file. Check that it is a valid CSV.")
+
+        return error_response(
+            "Could not read the CSV file. "
+            "Check that it is a valid CSV."
+        )
+
+    dataset_timer.finish("CSV loaded")
+
+    debug_log(
+        "DATASET",
+        f"Rows: {df.shape[0]:,} | "
+        f"Columns: {df.shape[1]}",
+    )
+
+    debug_log(
+        "VALIDATION",
+        "Validating DataFrame structure",
+    )
 
     problem = check_dataframe(df)
+
     if problem:
         return error_response(problem)
+
+    debug_log(
+        "VALIDATION",
+        "DataFrame validation passed",
+    )
 
     # Step 3: Restrict Multi run at the same time
     if not _SLOTS.acquire(blocking=False):
-        return error_response("The analysis service is busy. Please try again in a moment.")
+        return error_response(
+            "The analysis service is busy. "
+            "Please try again in a moment."
+        )
+
+    debug_log(
+        "RUNNER",
+        "Analysis execution slot acquired",
+    )
 
     try:
         if explain:
+            debug_log(
+                "ROUTER",
+                "Checking business metrics",
+            )
+
+            route_timer = DebugTimer("BUSINESS")
+
             fast_result = try_business_analysis(
                 df,
                 question,
             )
 
             if fast_result is not None:
+                route_timer.finish(
+                    "Business metrics handled request"
+                )
+
+                debug_log(
+                    "ROUTER",
+                    "Selected deterministic business analysis",
+                )
+
                 return fast_result
+
+            debug_log(
+                "ROUTER",
+                "No matching business metrics intent",
+            )
+
+            debug_log(
+                "ROUTER",
+                "Checking annual metrics",
+            )
+
+            route_timer = DebugTimer("ANNUAL")
 
             annual_result = try_annual_analysis(
                 df,
@@ -294,12 +613,79 @@ def run_analysis(csv_file: str, question: str, explain: bool = True):
             )
 
             if annual_result is not None:
+                route_timer.finish(
+                    "Annual metrics handled request"
+                )
+
+                debug_log(
+                    "ROUTER",
+                    "Selected deterministic annual analysis",
+                )
+
                 return annual_result
 
-        return run_agent(df, question, explain)
+            debug_log(
+                "ROUTER",
+                "No matching annual metrics intent",
+            )
+
+            debug_log(
+                "ROUTER",
+                "Checking contextual metrics",
+            )
+
+            route_timer = DebugTimer("CONTEXTUAL")
+
+            contextual_result = try_contextual_analysis(
+                df,
+                question,
+                context=context,
+            )
+
+            if contextual_result is not None:
+                route_timer.finish(
+                    "Contextual metrics handled request"
+                )
+
+                debug_log(
+                    "ROUTER",
+                    "Selected deterministic contextual analysis",
+                )
+
+                return contextual_result
+
+            debug_log(
+                "ROUTER",
+                "No matching contextual metrics intent",
+            )
+
+        else:
+            debug_log(
+                "ROUTER",
+                "Deterministic routes skipped: explain=False",
+            )
+
+        debug_log(
+            "ROUTER",
+            "Selected general AI agent",
+        )
+
+        return run_agent(
+            df,
+            question,
+            explain,
+            context=context,
+        )
 
     finally:
         _SLOTS.release()
+
+        debug_log(
+            "CLEANUP",
+            "Agent execution slot released",
+        )
+
+        timer.finish("Analysis execution finished")
 
 def check_limits_are_active(agent):
     # Check step limit
@@ -309,14 +695,83 @@ def check_limits_are_active(agent):
         raise RuntimeError("mini-swe-agent did not apply the step or time limit "
                            "(this needs mini-swe-agent 2.3 or newer)")
 
-def run_agent(df, question, explain):
+def run_agent(df, question, explain, context=None):
     environment = DataAnalysisEnvironment(df)
 
+    debug_log(
+        "AGENT",
+        "Data analysis environment initialized",
+    )
+
     try:
+        import_timer = DebugTimer("IMPORT")
+
+        debug_log(
+            "IMPORT",
+            "General AI route selected; loading AI dependencies",
+        )
+
+        from agent.prompts import SYSTEM_PROMPT
+
+        debug_log(
+            "IMPORT",
+            "Analysis system prompt loaded",
+        )
+
+        debug_log(
+            "PROMPT SIZE",
+            f"System prompt: {len(SYSTEM_PROMPT):,} characters",
+        )
+
+        debug_log(
+            "PROMPT SIZE",
+            f"Security note: {len(SECURITY_NOTE):,} characters",
+        )
+
+        import_timer.finish("Initial AI dependencies loaded")
+
         # Step 4: Build the analysis prompt.
-        prompt = build_analysis_prompt(question, df)
+        debug_log(
+            "PROMPT",
+            "Preparing analysis prompt",
+        )
+        prompt = build_analysis_prompt(
+            question,
+            df,
+            context=context,
+        )
+
+        debug_log(
+            "PROMPT",
+            f"Analysis prompt prepared | "
+            f"Characters: {len(prompt)}",
+        )
+
+        debug_log(
+            "PROMPT SIZE",
+            f"Analysis prompt: {len(prompt):,} characters",
+        )
+
+        debug_log(
+            "PROMPT SIZE",
+            f"Total initial prompt: "
+            f"{len(SYSTEM_PROMPT) + len(SECURITY_NOTE) + len(prompt):,} "
+            f"characters",
+        )
+
+        debug_log(
+            "PROMPT SIZE",
+            f"Historical messages: {len(context or [])}",
+        )
 
         # Step 5: Configure mini-swe-agent.
+        initialization_timer = DebugTimer("IMPORT")
+
+        debug_log(
+            "IMPORT",
+            "Loading mini-swe-agent and model client",
+        )
+
         agent = DefaultAgent(
             model=QwenModelAdapter(),
             env=environment,
@@ -325,18 +780,63 @@ def run_agent(df, question, explain):
             step_limit=MAX_ATTEMPTS,
             wall_time_limit_seconds=AGENT_TIME_LIMIT_SECONDS,
         )
+
         check_limits_are_active(agent)
 
+        debug_log(
+            "AGENT LIMITS",
+            "Step limit and wall-time limit verified",
+        )
+
+        initialization_timer.finish(
+            "AI agent dependencies loaded and agent initialized"
+        )
+
+        debug_log(
+            "AGENT",
+            f"Agent configured | "
+            f"Step limit: {MAX_ATTEMPTS} | "
+            f"Agent time limit: {AGENT_TIME_LIMIT_SECONDS}s",
+        )
+
         # Step 6: Start the agent.
-        result = agent.run(task=prompt, system_prompt=SYSTEM_PROMPT + SECURITY_NOTE)
+        agent_timer = DebugTimer("AGENT")
+
+        debug_log(
+            "AGENT",
+            "Starting mini-swe-agent execution loop",
+        )
+
+        result = agent.run(
+            task=prompt,
+            system_prompt=SYSTEM_PROMPT + SECURITY_NOTE,
+        )
+
+        agent_timer.finish("Agent execution loop finished")
     
-    except Exception as exc:  # model or API problems, for example a wrong key or a timeout
+    except AnalysisBudgetExceeded:
+        debug_log(
+            "BUDGET",
+            "Insufficient time for another analysis attempt",
+        )
+
+        return error_response(
+            "The AI model could not complete the analysis "
+            "within the available time. Please try again "
+            "or ask a more specific question."
+        )
+
+    except Exception as exc:
         log_error("agent run failed", exc)
         return error_response(safe_error_message(exc))
 
     # Step 7: Return the answer response.
     last = environment.last
     status = result.get("exit_status")
+    debug_log(
+        "AGENT",
+        f"Exit status: {status}",
+    )
 
     if status == "SandboxError":
         detail = hide_secrets((last or {}).get("error", ""))
@@ -355,38 +855,370 @@ def run_agent(df, question, explain):
         return error_response(message)
 
     # Step 8: Translate the calculated result to plain language.
-    plain_answer = describe_plainly(last)
-    answer = explain_result(question, last, plain_answer) if explain else plain_answer
+    debug_log(
+        "RESULT",
+        "Preparing calculated result for presentation",
+    )
 
-    table = last["result"] if last["result_type"] == "table" else None
-    return {"answer": answer, "table": table, "error": None}
+    plain_answer = describe_plainly(last)
+
+    result_value = last["result"]
+    result_type = last["result_type"]
+
+    debug_log(
+        "RESULT INTEGRITY",
+        f"Result type: {result_type} | "
+        f"Python type: {type(result_value).__name__}",
+    )
+
+    debug_log(
+        "RESULT INTEGRITY",
+        f"Direct calculated answer: "
+        f"{hide_secrets(plain_answer)}",
+    )
+
+    # Convert suitable structured results into supporting tables.
+    structured_table = None
+    structured_table_name = None
+
+    if result_type == "object":
+        structured_table_name, structured_table = (
+            extract_record_table(result_value)
+        )
+
+    if structured_table is not None:
+        debug_log(
+            "RESULT INTEGRITY",
+            "Structured result converted to supporting table",
+        )
+
+        plain_answer = describe_record_table(
+            result_value,
+            structured_table_name,
+            structured_table,
+        )
+
+        if len(plain_answer) > MAX_ANSWER_CHARS:
+            plain_answer = (
+                plain_answer[:MAX_ANSWER_CHARS]
+                + "\n...[answer truncated]"
+            )
+
+        debug_log(
+            "RESULT FORMAT",
+            f"Structured answer length: "
+            f"{len(plain_answer)} characters",
+        )
+
+    # Structured tables, lists and missing values can be
+    # presented without another model request.
+    direct_result = (
+        structured_table is not None
+        or (
+            result_type == "object"
+            and isinstance(result_value, list)
+        )
+        or result_value is None
+        or (
+            isinstance(result_value, dict)
+            and not result_value
+        )
+    )
+
+    should_explain = explain and not direct_result
+
+    debug_log(
+        "ANSWER",
+        "Generating natural-language explanation"
+        if should_explain
+        else "Using direct calculated answer",
+    )
+
+    if direct_result:
+        debug_log(
+            "RESULT INTEGRITY",
+            "Using deterministic result presentation; "
+            "explanation model not required",
+        )
+
+    answer = (
+        explain_result(
+            question,
+            last,
+            plain_answer,
+            context=context,
+        )
+        if should_explain
+        else plain_answer
+    )
+
+    table = (
+        result_value
+        if result_type == "table"
+        else structured_table
+    )
+
+    debug_log(
+        "RESULT FORMAT",
+        f"Supporting table available: "
+        f"{table is not None}",
+    )
+
+    if table is not None:
+        debug_log(
+            "RESULT FORMAT",
+            f"Supporting table rows: {len(table)}",
+        )
+
+    debug_log(
+        "RESULT INTEGRITY",
+        "Calculated result prepared for frontend",
+    )
+
+    return {
+        "answer": answer,
+        "table": table,
+        "error": None,
+    }
 
 
 def describe_plainly(last):
-    # The answer in type of value / the number of rows of a table.
-    if last["result_type"] == "table":
-        return f"The analysis returned {len(last['result'])} row(s)."
-    text = str(last["result"])
+    """Present calculated results without relying on the LLM."""
+
+    value = last["result"]
+    result_type = last["result_type"]
+
+    debug_log(
+        "RESULT FORMAT",
+        f"Formatting {result_type} result",
+    )
+
+    if result_type == "table":
+        row_count = len(value)
+
+        debug_log(
+            "RESULT FORMAT",
+            f"Table contains {row_count} row(s)",
+        )
+
+        return f"The analysis returned {row_count} row(s)."
+
+    if value is None:
+        debug_log(
+            "RESULT FORMAT",
+            "Calculated result is null",
+        )
+
+        return "The calculation did not return a value."
+
+    if isinstance(value, list):
+        debug_log(
+            "RESULT FORMAT",
+            f"List contains {len(value)} item(s)",
+        )
+
+        if not value:
+            return "No matching results were returned."
+
+        lines = [
+            "- " + (
+                escape_text(item)
+                if isinstance(item, str)
+                else escape_text(
+                    json.dumps(
+                        item,
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                )
+            )
+            for item in value
+        ]
+
+        text = (
+            f"**Calculated results ({len(value)}):**\n\n"
+            + "\n".join(lines)
+        )
+
+    elif isinstance(value, dict):
+        debug_log(
+            "RESULT FORMAT",
+            f"Dictionary contains {len(value)} field(s)",
+        )
+
+        if not value:
+            return "The calculation returned no values."
+
+        lines = [
+            "- **"
+            + escape_text(readable_label(key))
+            + ":** "
+            + format_named_value(key, item)
+            for key, item in value.items()
+        ]
+
+        text = (
+            "**Calculated values:**\n\n"
+            + "\n".join(lines)
+        )
+
+    else:
+        debug_log(
+            "RESULT FORMAT",
+            "Formatting scalar value",
+        )
+
+        text = str(value)
+
     if len(text) > MAX_ANSWER_CHARS:
-        text = text[:MAX_ANSWER_CHARS] + "\n...[answer truncated]"
+        debug_log(
+            "RESULT FORMAT",
+            f"Result exceeds {MAX_ANSWER_CHARS} characters; "
+            "truncating displayed answer",
+        )
+
+        text = (
+            text[:MAX_ANSWER_CHARS]
+            + "\n...[answer truncated]"
+        )
+
+    debug_log(
+        "RESULT FORMAT",
+        f"Formatted answer length: {len(text)} characters",
+    )
+
     return text
 
 
-def explain_result(question, last, plain_answer):
+def explain_result(
+    question,
+    last,
+    plain_answer,
+    context=None,
+):
     # Ask the model to explain the result. Fail -> Goto plain answer
+    timer = DebugTimer("EXPLANATION")
+
+    debug_log(
+        "EXPLANATION",
+        "Sending calculated result to explanation model",
+    )
+
     try:
-        reply = generate_response([
-            {"role": "system", "content": EXPLANATION_PROMPT},
-            {"role": "user", "content": build_explanation_prompt(
-                question, last["result"], last["result_type"])},
-        ])
+        timeout = explanation_request_timeout()
+
+        debug_log(
+            "BUDGET",
+            f"Explanation request | "
+            f"Remaining analysis time: "
+            f"{remaining_seconds():.2f}s | "
+            f"Request timeout: {timeout:.2f}s",
+        )
+
+        from agent.prompts import EXPLANATION_PROMPT
+
+        debug_log(
+            "IMPORT",
+            "Explanation system prompt loaded",
+        )
+
+        reply = generate_response(
+            [
+                {
+                    "role": "system",
+                    "content": EXPLANATION_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": build_explanation_prompt(
+                        question,
+                        last["result"],
+                        last["result_type"],
+                        context=context,
+                    ),
+                },
+            ],
+            timeout=timeout,
+            purpose="explanation",
+        )
+    except AnalysisBudgetExceeded:
+        debug_log(
+            "BUDGET",
+            "Skipping explanation: insufficient time remains",
+        )
+
+        timer.finish(
+            "Explanation skipped; preserving calculated result"
+        )
+
+        return plain_answer
     except Exception as exc:
         log_error("explanation failed", exc)
+
+        timer.finish("Explanation generation failed")
+
+        debug_log(
+            "EXPLANATION",
+            "Falling back to direct calculated answer",
+        )
+
         return plain_answer
+
+    timer.finish("Explanation model responded")
 
     text = THINK_BLOCK.sub("", reply or "").strip()
     if not text:
+        debug_log(
+            "EXPLANATION",
+            "Empty explanation; using direct answer",
+        )
+
         return plain_answer
     if len(text) > MAX_ANSWER_CHARS:
-        text = text[:MAX_ANSWER_CHARS] + "\n...[answer truncated]"
-    return text
+        text = (
+            text[:MAX_ANSWER_CHARS]
+            + "\n...[answer truncated]"
+        )
+
+    debug_log(
+        "EXPLANATION",
+        "Final explanation prepared",
+    )
+
+    value = last["result"]
+    result_type = last["result_type"]
+
+    if result_type == "table":
+        # The frontend already displays the calculated table.
+        debug_log(
+            "RESULT INTEGRITY",
+            "Original table retained separately",
+        )
+
+        return text
+
+    if text.strip() == plain_answer.strip():
+        debug_log(
+            "RESULT INTEGRITY",
+            "Explanation matches direct result",
+        )
+
+        return text
+
+    # Always retain the original calculated value.
+    # A successful model response is not proof of accuracy.
+    debug_log(
+        "RESULT INTEGRITY",
+        "Preserving original calculated values "
+        "alongside the AI explanation",
+    )
+
+    answer = (
+        "**AI interpretation**\n\n"
+        + text
+        + "\n\n---\n\n"
+        + "**Original calculation**\n\n"
+        + plain_answer
+    )
+
+    return answer

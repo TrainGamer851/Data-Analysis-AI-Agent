@@ -31,6 +31,7 @@ import uuid
 from importlib.metadata import version
 
 import pandas as pd
+from agent.debug_logger import debug_log, DebugTimer
 
 STARTUP_GRACE = 10  # extra seconds for interpreter + pandas startup
 MAX_ROWS = 200      # change this please change also in prompts.py
@@ -44,6 +45,11 @@ _image_ready = False  # checked once per process
 
 # default return
 def _fail(message: str) -> dict:
+    debug_log(
+        "SANDBOX ERROR",
+        message,
+    )
+
     return {
         "success": False,
         "result": None,
@@ -63,50 +69,192 @@ def clean_code(text: str) -> str:
 
 # Docker helpers
 def docker_available() -> bool:
-    """True <- the Docker client is installed and the daemon is running."""
+    """True when Docker is installed and its daemon is running."""
+
+    timer = DebugTimer("DOCKER")
+
+    debug_log(
+        "DOCKER",
+        "Checking Docker daemon availability",
+    )
+
     try:
-        r = subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
-                           capture_output=True, timeout=15)
-        return r.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
+        r = subprocess.run(
+            [
+                "docker",
+                "version",
+                "--format",
+                "{{.Server.Version}}",
+            ],
+            capture_output=True,
+            timeout=15,
+        )
+
+        available = r.returncode == 0
+
+        debug_log(
+            "DOCKER",
+            f"Docker available: {available}",
+        )
+
+        return available
+
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        debug_log(
+            "DOCKER ERROR",
+            f"Availability check failed: {type(exc).__name__}",
+        )
+
         return False
+
+    finally:
+        timer.finish("Docker availability check finished")
  
 def prepare_sandbox() -> str | None:
-    """Check sandbox image exists and matches the installed pandas.
- 
-    Builds it if needed (very slow for first build).
-    Returns an error message, or None when ready.
-    execute_code() calls it automatically;
-        (intended to) call it at app startup to avoid a slow first question.
-    """
+    """Check sandbox image exists and matches installed pandas."""
+
     global _image_ready
+
+    timer = DebugTimer("DOCKER IMAGE")
+
+    debug_log(
+        "DOCKER IMAGE",
+        f"Preparing sandbox image: {IMAGE}",
+    )
+
     if _image_ready:
+        debug_log(
+            "DOCKER IMAGE",
+            "Image already verified in this process",
+        )
+
         return None
+
     try:
-        # If our image exists
-        # Read "pandas" label stored in the image
-        r = subprocess.run(["docker", "image", "inspect", "-f", "{{.Config.Labels.pandas}}", IMAGE],
-                           capture_output=True, timeout=30)
-        if r.returncode == 0 and r.stdout.decode().strip() == pd.__version__:
+        debug_log(
+            "DOCKER IMAGE",
+            "Inspecting existing sandbox image",
+        )
+
+        debug_log(
+            "DOCKER IMAGE",
+            f"Required pandas version: {pd.__version__}",
+        )
+
+        r = subprocess.run(
+            [
+                "docker",
+                "image",
+                "inspect",
+                "-f",
+                "{{.Config.Labels.pandas}}",
+                IMAGE,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+
+        image_version = r.stdout.decode().strip()
+
+        debug_log(
+            "DOCKER IMAGE",
+            f"Inspection exit code: {r.returncode}",
+        )
+
+        if r.returncode == 0:
+            debug_log(
+                "DOCKER IMAGE",
+                f"Installed image pandas version: {image_version}",
+            )
+
+        if (
+            r.returncode == 0
+            and image_version == pd.__version__
+        ):
             _image_ready = True
+
+            timer.finish("Existing sandbox image verified")
+
             return None
-        # Missing/wrong pandas version: re-build to correct
-        with tempfile.TemporaryDirectory() as empty_context:  # open empty Docker
+
+        debug_log(
+            "DOCKER IMAGE",
+            "Image missing or version mismatch",
+        )
+
+        debug_log(
+            "DOCKER IMAGE",
+            "Starting sandbox image build",
+        )
+
+        with tempfile.TemporaryDirectory(
+            dir=os.environ.get("ANALYSIS_TEMP_DIR")
+        ) as empty_context:
+
+            build_timer = DebugTimer("DOCKER BUILD")
+
             build = subprocess.run(
-                ["docker", "build", "-t", IMAGE, "-f", _DOCKERFILE,
-                 "--build-arg", f"PANDAS_VERSION={pd.__version__}",
-                 "--build-arg", f"NUMPY_VERSION={version('numpy')}", empty_context],
-                capture_output=True, timeout=900)
+                [
+                    "docker",
+                    "build",
+                    "-t",
+                    IMAGE,
+                    "-f",
+                    _DOCKERFILE,
+                    "--build-arg",
+                    f"PANDAS_VERSION={pd.__version__}",
+                    "--build-arg",
+                    f"NUMPY_VERSION={version('numpy')}",
+                    empty_context,
+                ],
+                capture_output=True,
+                timeout=900,
+            )
+
+            build_timer.finish("Docker build command finished")
+
     except OSError as exc:
-        return f"Execution Error: could not run Docker. Is it installed and on PATH? ({exc})"
+        debug_log(
+            "DOCKER ERROR",
+            "Unable to execute Docker command",
+        )
+
+        return (
+            "Execution Error: could not run Docker. "
+            f"Is it installed and on PATH? ({exc})"
+        )
+
     except subprocess.TimeoutExpired:
+        debug_log(
+            "DOCKER ERROR",
+            "Docker image preparation timed out",
+        )
+
         return "Execution Error: building the sandbox image timed out."
+
     if build.returncode != 0:
-        tail = build.stderr.decode("utf-8", "replace").strip()[-400:]
-        return f"Execution Error: could not build the sandbox image. Is Docker running? {tail}"
+        debug_log(
+            "DOCKER ERROR",
+            f"Image build exit code: {build.returncode}",
+        )
+
+        tail = (
+            build.stderr
+            .decode("utf-8", "replace")
+            .strip()[-400:]
+        )
+
+        return (
+            "Execution Error: could not build the sandbox image. "
+            f"Is Docker running? {tail}"
+        )
+
     _image_ready = True
+
+    timer.finish("Sandbox image prepared successfully")
+
     return None
- 
+
 def _docker_base(name: str, memory_mb: int) -> list[str]:
     """`docker run` flags for the locked-down container (image and command are appended)."""
     limit = f"{memory_mb + 512}m"  # headroom for the Python + pandas baseline
@@ -137,13 +285,52 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         }.
     DataFrames and Series come back as a list of row dicts.
     """
+    timer = DebugTimer("EXECUTION")
+
+    debug_log(
+        "EXECUTION",
+        "Starting sandbox execution pipeline",
+    )
+
+    debug_log(
+        "EXECUTION",
+        "Cleaning generated Python code",
+    )
+
     code = clean_code(code_string)
+
+    debug_log(
+        "EXECUTION",
+        f"Cleaned code characters: {len(code)}",
+    )
+
     if not code:
         return _fail("Execution Error: no code was provided.")
     if df is None or df.empty:
         return _fail("Execution Error: the dataset DataFrame is empty or None.")
 
     docker = os.environ.get("SANDBOX_BACKEND", "local").lower() == "docker"
+
+    debug_log(
+        "EXECUTION",
+        f"Backend selected: {'docker' if docker else 'local'}",
+    )
+
+    debug_log(
+        "EXECUTION",
+        f"Dataset: {df.shape[0]:,} rows | "
+        f"{df.shape[1]} columns",
+    )
+
+    debug_log(
+        "EXECUTION",
+        f"Worker memory limit: {memory_mb} MB",
+    )
+
+    debug_log(
+        "EXECUTION",
+        f"Maximum returned table rows: {max_rows}",
+    )
 
     job_id = os.environ.get("ANALYSIS_JOB_ID", "")
 
@@ -156,10 +343,35 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         name = f"sandbox-{uuid.uuid4().hex[:12]}"
 
     if docker:
+        debug_log(
+            "DOCKER",
+            f"Preparing container: {name}",
+        )
+
         error = prepare_sandbox()
         if error:
             return _fail(error)
         cmd = _docker_base(name, memory_mb)
+
+        debug_log(
+            "DOCKER",
+            "Container security configuration prepared",
+        )
+
+        debug_log(
+            "DOCKER",
+            "Network disabled | Read-only filesystem | Non-root",
+        )
+
+        debug_log(
+            "DOCKER",
+            "CPU limit: 1 | Process limit: 64",
+        )
+
+        debug_log(
+            "DOCKER",
+            f"Container memory limit: {memory_mb + 512} MB",
+        )
 
         if job_id:
             cmd += ["--label", f"data-analysis-job={job_id}"]
@@ -177,17 +389,47 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         if os.name == "nt":  # Python on Windows
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
 
+    payload_timer = DebugTimer("PAYLOAD")
+
+    debug_log(
+        "PAYLOAD",
+        "Serializing code and dataset for sandbox worker",
+    )
+
     payload = pickle.dumps({
         "code": code,
         "df": df,
         "memory_mb": memory_mb,
         "max_rows": max_rows
-        })
+    })
+
+    debug_log(
+        "PAYLOAD",
+        f"Serialized payload size: "
+        f"{len(payload) / 1024:,.2f} KB",
+    )
+
+    payload_timer.finish("Payload serialization completed")
 
     effective_timeout = timeout + STARTUP_GRACE + (10 if docker else 0)
 
-    with tempfile.TemporaryDirectory() as workdir: #Make a "fake" ttemp cwd to run
+    debug_log(
+        "EXECUTION",
+        f"Code timeout: {timeout}s | "
+        f"Effective wall timeout: {effective_timeout}s",
+    )
+
+    with tempfile.TemporaryDirectory(
+        dir=os.environ.get("ANALYSIS_TEMP_DIR")
+    ) as workdir:
         try:
+            execution_timer = DebugTimer("SANDBOX WORKER")
+
+            debug_log(
+                "SANDBOX WORKER",
+                "Launching isolated execution worker",
+            )
+
             proc = subprocess.run(
                 cmd,
                 input=payload,
@@ -196,8 +438,34 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
                 cwd=workdir,
                 timeout=effective_timeout,
             )
+
+            execution_timer.finish("Sandbox worker exited")
+
+            debug_log(
+                "SANDBOX WORKER",
+                f"Exit code: {proc.returncode}",
+            )
+
+            debug_log(
+                "SANDBOX WORKER",
+                f"Standard output bytes: {len(proc.stdout)}",
+            )
+
+            debug_log(
+                "SANDBOX WORKER",
+                f"Standard error bytes: {len(proc.stderr)}",
+            )
         except subprocess.TimeoutExpired:
+            debug_log(
+                "SANDBOX TIMEOUT",
+                f"Worker exceeded {effective_timeout}s wall limit",
+            )
+
             if docker: #kill docker
+                debug_log(
+                    "DOCKER",
+                    f"Attempting to kill timed-out container: {name}",
+                )
                 with contextlib.suppress(Exception):
                     subprocess.run(["docker", "kill", name],
                         capture_output=True,
@@ -210,7 +478,54 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
             return _fail(f"Execution Error: could not start the sandbox ({exc})")
 
     try:
-        return json.loads(proc.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
+        debug_log(
+            "RESULT",
+            "Decoding sandbox worker JSON response",
+        )
+
+        result = json.loads(
+            proc.stdout
+            .decode("utf-8", "replace")
+            .strip()
+            .splitlines()[-1]
+        )
+
+        debug_log(
+            "RESULT",
+            f"Sandbox success: {result.get('success')}",
+        )
+
+        debug_log(
+            "RESULT",
+            f"Result type: {result.get('result_type')}",
+        )
+
+        if result.get("result_type") == "table":
+            debug_log(
+                "RESULT",
+                f"Returned table rows: "
+                f"{len(result.get('result') or [])}",
+            )
+
+        timer.finish("Sandbox execution pipeline finished")
+
+        return result
+
     except (IndexError, ValueError):
-        stderr = proc.stderr.decode("utf-8", "replace").strip()[-400:]
-        return _fail(f"Execution Error: worker crashed (exit code {proc.returncode}). {stderr}")
+        debug_log(
+            "RESULT ERROR",
+            "Unable to decode sandbox worker response",
+        )
+
+        stderr = (
+            proc.stderr
+            .decode("utf-8", "replace")
+            .strip()[-400:]
+        )
+
+        timer.finish("Sandbox execution pipeline failed")
+
+        return _fail(
+            f"Execution Error: worker crashed "
+            f"(exit code {proc.returncode}). {stderr}"
+        )

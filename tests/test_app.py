@@ -118,7 +118,12 @@ def test_empty_question():
 
 
 def test_analysis_backend(monkeypatch):
-    def fake_analysis(csv_path, question, explain=True):
+    def fake_analysis(
+        csv_path,
+        question,
+        explain=True,
+        context=None,
+    ):
         assert csv_path == str(CSV_FILE)
         assert question == "What is total sales?"
         assert explain is True
@@ -283,8 +288,8 @@ def test_controlled_message_success():
 
     with patch.object(
         frontend,
-        "analyze_question",
-        return_value="Total sales: 300.00",
+        "analyze_question_with_chart",
+        return_value=("Total sales: 300.00", None),
     ):
         updates = list(
             frontend.send_controlled_message(
@@ -308,16 +313,21 @@ def test_controlled_message_cancellation():
         session_hash="test-cancellation"
     )
 
-    def fake_analysis(question, csv_path, job=None):
+    def fake_analysis(
+        question,
+        csv_path,
+        job=None,
+        context=None,
+    ):
         frontend.cancel_active_analysis(request)
 
         assert job.cancelled is True
 
-        return "This result should not appear."
+        return "This result should not appear.", None
 
     with patch.object(
         frontend,
-        "analyze_question",
+        "analyze_question_with_chart",
         side_effect=fake_analysis,
     ):
         updates = list(
@@ -414,3 +424,180 @@ def test_controlled_message_rejects_duplicate_job():
             frontend._active_jobs.pop(
                 request.session_hash, None
             )
+
+def test_analysis_with_chart():
+    response = {
+        "answer": "Profit by category.",
+        "table": [
+            {"Category": "Technology", "Profit": 1000},
+            {"Category": "Furniture", "Profit": 200},
+        ],
+        "error": None,
+    }
+
+    with patch.object(
+        frontend,
+        "run_analysis",
+        return_value=response,
+    ):
+        answer, figure = frontend.analyze_question_with_chart(
+            "Show profit by category.",
+            "orders.csv",
+        )
+
+    assert "Profit by category." in answer
+    assert "Supporting Data" in answer
+    assert figure is not None
+    assert figure.data[0].type == "bar"
+
+
+def test_analysis_without_chart():
+    response = {
+        "answer": "Total sales: $1,000.00",
+        "table": None,
+        "error": None,
+    }
+
+    with patch.object(
+        frontend,
+        "run_analysis",
+        return_value=response,
+    ):
+        answer, figure = frontend.analyze_question_with_chart(
+            "What are the total sales?",
+            "orders.csv",
+        )
+
+    assert answer == "Total sales: $1,000.00"
+    assert figure is None
+
+
+def test_chart_failure_preserves_answer():
+    response = {
+        "answer": "Profit by category.",
+        "table": [
+            {"Category": "Technology", "Profit": 1000},
+            {"Category": "Furniture", "Profit": 200},
+        ],
+        "error": None,
+    }
+
+    with patch.object(
+        frontend,
+        "run_analysis",
+        return_value=response,
+    ):
+        with patch.object(
+            frontend,
+            "build_chart",
+            side_effect=RuntimeError("Chart failed"),
+        ):
+            answer, figure = (
+                frontend.analyze_question_with_chart(
+                    "Show profit by category.",
+                    "orders.csv",
+                )
+            )
+
+    assert "Profit by category." in answer
+    assert "Supporting Data" in answer
+    assert figure is None
+
+def test_followup_receives_previous_context():
+    request = SimpleNamespace(
+        session_hash="test-followup"
+    )
+
+    history = [
+        {
+            "role": "user",
+            "content": "Which region has the highest profit?",
+        },
+        {
+            "role": "assistant",
+            "content": "West has the highest profit.",
+        },
+    ]
+
+    with patch.object(
+        frontend,
+        "analyze_question_with_chart",
+        return_value=("West exceeds East.", None),
+    ) as mock_analysis:
+
+        updates = list(
+            frontend.send_controlled_message(
+                "How much higher is it than East?",
+                history,
+                "orders.csv",
+                request,
+            )
+        )
+
+    context = mock_analysis.call_args.kwargs["context"]
+
+    assert len(context) == 2
+    assert context[1]["content"] == (
+        "West has the highest profit."
+    )
+
+    assert updates[-1][0][-1]["content"] == (
+        "West exceeds East."
+    )
+
+
+def test_first_question_has_no_context():
+    request = SimpleNamespace(
+        session_hash="test-no-context"
+    )
+
+    with patch.object(
+        frontend,
+        "analyze_question_with_chart",
+        return_value=("Total sales: $300.", None),
+    ) as mock_analysis:
+
+        list(
+            frontend.send_controlled_message(
+                "What are total sales?",
+                [],
+                "orders.csv",
+                request,
+            )
+        )
+
+    assert mock_analysis.call_args.kwargs["context"] == []
+
+
+def test_cancelled_turn_not_sent_as_context():
+    request = SimpleNamespace(
+        session_hash="test-cancelled-context"
+    )
+
+    history = [
+        {
+            "role": "user",
+            "content": "Analyze everything.",
+        },
+        {
+            "role": "assistant",
+            "content": "Analysis stopped.",
+        },
+    ]
+
+    with patch.object(
+        frontend,
+        "analyze_question_with_chart",
+        return_value=("Total profit: $100.", None),
+    ) as mock_analysis:
+
+        list(
+            frontend.send_controlled_message(
+                "What is total profit?",
+                history,
+                "orders.csv",
+                request,
+            )
+        )
+
+    assert mock_analysis.call_args.kwargs["context"] == []

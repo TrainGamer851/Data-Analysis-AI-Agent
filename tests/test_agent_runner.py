@@ -17,7 +17,7 @@ class FakeLLM:
         self.replies = list(replies)
         self.calls = []  # the messages sent on each call
 
-    def __call__(self, messages):
+    def __call__(self, messages, **kwargs):
         self.calls.append(messages)
         if not self.replies:
             raise AssertionError("FakeLLM was called more times than scripted")
@@ -217,11 +217,11 @@ def test_explanation_stage(fake_llm, csv_file):
         explain=True,
     )
 
-    assert out == {
-        "answer": "The total sales are $375.50.",
-        "table": None,
-        "error": None,
-    }
+    assert out["error"] is None
+    assert out["table"] is None
+    assert "The total sales are $375.50." in out["answer"]
+    assert "**Original calculation**" in out["answer"]
+    assert "375.5" in out["answer"]
 
     assert len(llm.calls) == 2
 
@@ -243,3 +243,502 @@ def test_explanation_failure_preserves_result(fake_llm, csv_file):
         "table": None,
         "error": None,
     }
+
+def test_followup_context_reaches_model(fake_llm, csv_file):
+    llm = fake_llm(
+        "result = df.loc[df['Region'] == 'East', 'Profit'].sum()"
+    )
+
+    context = [
+        {
+            "role": "user",
+            "content": "Which region has the highest profit?",
+        },
+        {
+            "role": "assistant",
+            "content": "East has the highest profit.",
+        },
+    ]
+
+    result = run_analysis(
+        csv_file,
+        "How much profit did it generate?",
+        explain=False,
+        context=context,
+    )
+
+    assert result["error"] is None
+    assert result["answer"] == "40.0"
+
+    prompt = "\n".join(
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "user"
+    )
+
+    assert "BEGIN CONVERSATION" in prompt
+    assert "East has the highest profit." in prompt
+    assert "How much profit did it generate?" in prompt
+
+
+def test_context_reaches_explanation_model(fake_llm, csv_file):
+    llm = fake_llm(
+        "result = df.loc[df['Region'] == 'East', 'Profit'].sum()",
+        "East generated $40.00 in profit.",
+    )
+
+    context = [
+        {
+            "role": "user",
+            "content": "Which region performed best?",
+        },
+        {
+            "role": "assistant",
+            "content": "East had the highest profit.",
+        },
+    ]
+
+    result = run_analysis(
+        csv_file,
+        "How much profit did it generate?",
+        explain=True,
+        context=context,
+    )
+
+    assert result["error"] is None
+    assert (
+        "East generated $40.00 in profit."
+        in result["answer"]
+    )
+
+    assert "**Original calculation**" in result["answer"]
+    assert "40.0" in result["answer"]
+
+    assert len(llm.calls) == 2
+
+    explanation_prompt = llm.calls[1][-1]["content"]
+
+    assert "BEGIN CONVERSATION" in explanation_prompt
+    assert "East had the highest profit." in explanation_prompt
+    assert "40.0" in explanation_prompt
+
+
+def test_explanation_skipped_when_budget_is_low(
+    monkeypatch,
+):
+    import time
+
+    monkeypatch.setenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        str(time.monotonic() + 7),
+    )
+
+    def unexpected_model_call(*args, **kwargs):
+        pytest.fail("Explanation model should not be called")
+
+    monkeypatch.setattr(
+        runner,
+        "generate_response",
+        unexpected_model_call,
+    )
+
+    last = {
+        "success": True,
+        "result": 375.5,
+        "result_type": "scalar",
+        "error": None,
+    }
+
+    answer = runner.explain_result(
+        "What are total sales?",
+        last,
+        "375.5",
+    )
+
+    assert answer == "375.5"
+
+
+def test_explanation_timeout_preserves_result(
+    monkeypatch,
+):
+    monkeypatch.delenv(
+        "ANALYSIS_DEADLINE_MONOTONIC",
+        raising=False,
+    )
+
+    def slow_model(*args, **kwargs):
+        raise TimeoutError("Model request timed out")
+
+    monkeypatch.setattr(
+        runner,
+        "generate_response",
+        slow_model,
+    )
+
+    last = {
+        "success": True,
+        "result": 375.5,
+        "result_type": "scalar",
+        "error": None,
+    }
+
+    answer = runner.explain_result(
+        "What are total sales?",
+        last,
+        "375.5",
+    )
+
+    assert answer == "375.5"
+
+# ---------------------------------------------------------------------------
+# Result integrity
+# ---------------------------------------------------------------------------
+
+def test_list_result_skips_explanation(fake_llm, csv_file):
+    llm = fake_llm(
+        "result = df['Region'].unique().tolist()",
+        "The region names are unavailable.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "List all distinct region names.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+    assert "West" in out["answer"]
+    assert "East" in out["answer"]
+    assert "South" in out["answer"]
+    assert "unavailable" not in out["answer"]
+    assert len(llm.calls) == 1
+
+
+def test_empty_list_result(fake_llm, csv_file):
+    llm = fake_llm(
+        "result = df.loc[df['Sales'] > 1000000, "
+        "'Region'].tolist()"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Find regions with transactions above one million.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["answer"] == (
+        "No matching results were returned."
+    )
+    assert len(llm.calls) == 1
+
+
+def test_dictionary_result_preserves_values(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {'Total Sales': df['Sales'].sum(), "
+        "'Total Profit': df['Profit'].sum()}",
+        "The calculated values are unavailable.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate combined sales and profit metrics.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "**Original calculation**" in out["answer"]
+    assert "Total Sales" in out["answer"]
+    assert "$375.50" in out["answer"]
+    assert "Total Profit" in out["answer"]
+    assert "$47.50" in out["answer"]
+    assert len(llm.calls) == 2
+
+
+def test_incorrect_scalar_explanation_preserves_value(
+    fake_llm,
+    csv_file,
+):
+    fake_llm(
+        "result = df['Sales'].sum()",
+        "Total sales are $999.00.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "What are total sales?",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "**Original calculation**" in out["answer"]
+    assert "375.5" in out["answer"]
+
+
+def test_null_result_skips_explanation(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm("result = None")
+
+    out = run_analysis(
+        csv_file,
+        "Calculate an unavailable metric.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["answer"] == (
+        "The calculation did not return a value."
+    )
+    assert len(llm.calls) == 1
+
+
+def test_table_survives_incorrect_explanation(
+    fake_llm,
+    csv_file,
+):
+    fake_llm(
+        "result = df.groupby('Region')['Sales'].sum()",
+        "The regional sales figures are unavailable.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate grouped regional revenue figures.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is not None
+    assert {
+        "Region": "West",
+        "Sales": 150.0,
+    } in out["table"]
+
+
+def test_empty_dictionary_format():
+    last = {
+        "result": {},
+        "result_type": "object",
+    }
+
+    assert runner.describe_plainly(last) == (
+        "The calculation returned no values."
+    )
+
+
+def test_nested_dictionary_format():
+    last = {
+        "result": {
+            "West": {
+                "Sales": 150.0,
+                "Profit": 5.0,
+            },
+        },
+        "result_type": "object",
+    }
+
+    answer = runner.describe_plainly(last)
+
+    assert "West" in answer
+    assert "Sales" in answer
+    assert "150.0" in answer
+    assert "Profit" in answer
+    assert "5.0" in answer
+
+
+def test_large_result_is_truncated():
+    last = {
+        "result": ["x" * 1000] * 10,
+        "result_type": "object",
+    }
+
+    answer = runner.describe_plainly(last)
+
+    assert "[answer truncated]" in answer
+
+
+
+def test_list_result_has_no_unnecessary_quotes(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = df['Region'].unique().tolist()"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "List all distinct region names.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "- West" in out["answer"]
+    assert '"West"' not in out["answer"]
+    assert len(llm.calls) == 1
+
+
+def test_nested_records_become_supporting_table(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {"
+        "'Total Sales': df['Sales'].sum(), "
+        "'regional_analysis': "
+        "df.groupby('Region', as_index=False)"
+        "['Sales'].sum().to_dict('records')"
+        "}"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate detailed regional sales figures.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "$375.50" in out["answer"]
+    assert out["table"] is not None
+    assert len(out["table"]) == 3
+
+    assert {
+        "Region": "West",
+        "Sales": 150.0,
+    } in out["table"]
+
+    assert len(llm.calls) == 1
+
+
+def test_list_of_records_becomes_table(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = df.groupby('Region', as_index=False)"
+        "['Profit'].sum().to_dict('records')"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate detailed regional profit records.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert len(out["table"]) == 3
+    assert len(llm.calls) == 1
+
+
+def test_named_dictionary_formats_money():
+    last = {
+        "result": {
+            "Total_Sales": 1234.567,
+            "Total_Profit": -100.25,
+        },
+        "result_type": "object",
+    }
+
+    answer = runner.describe_plainly(last)
+
+    assert "$1,234.57" in answer
+    assert "-$100.25" in answer
+
+
+def test_named_dictionary_formats_percentages():
+    last = {
+        "result": {
+            "Profit_Margin_Pct": 0.5,
+        },
+        "result_type": "object",
+    }
+
+    answer = runner.describe_plainly(last)
+
+    assert "0.50%" in answer
+    assert "50.00%" not in answer
+
+
+def test_structured_result_preserves_correlation():
+    from agent.result_formatter import (
+        describe_record_table,
+    )
+
+    records = [
+        {
+            "Category": "A",
+            "Discount_Profit_Correlation": -0.4782,
+        }
+    ]
+
+    value = {
+        "overall_discount_profit_correlation": -0.2189,
+        "category_analysis": records,
+    }
+
+    answer = describe_record_table(
+        value,
+        "category_analysis",
+        records,
+    )
+
+    assert "-0.2189" in answer
+    assert "Correlation does not establish causation." in answer
+
+
+def test_multiple_tables_are_not_silently_discarded():
+    from agent.result_formatter import extract_record_table
+
+    value = {
+        "sales": [{"Region": "West", "Sales": 150}],
+        "profit": [{"Region": "West", "Profit": 5}],
+    }
+
+    name, table = extract_record_table(value)
+
+    assert name is None
+    assert table is None
+
+
+def test_inconsistent_record_columns_are_rejected():
+    from agent.result_formatter import extract_record_table
+
+    value = [
+        {"Region": "West", "Sales": 150},
+        {"Region": "East", "Profit": 40},
+    ]
+
+    name, table = extract_record_table(value)
+
+    assert name is None
+    assert table is None
+
+
+def test_structured_table_row_limit():
+    from agent.result_formatter import (
+        extract_record_table,
+        describe_record_table,
+    )
+
+    value = [
+        {"Region": str(index), "Sales": index}
+        for index in range(250)
+    ]
+
+    name, table = extract_record_table(value)
+
+    assert len(table) == 200
+
+    answer = describe_record_table(
+        value,
+        name,
+        table,
+    )
+
+    assert "Showing 200 of 250" in answer
