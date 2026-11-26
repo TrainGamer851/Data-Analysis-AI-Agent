@@ -220,8 +220,9 @@ def test_explanation_stage(fake_llm, csv_file):
     assert out["error"] is None
     assert out["table"] is None
     assert "The total sales are $375.50." in out["answer"]
-    assert "**Original calculation**" in out["answer"]
-    assert "375.5" in out["answer"]
+    assert out["answer"] == "The total sales are $375.50."
+    assert "**Original calculation**" not in out["answer"]
+    assert "**AI interpretation**" not in out["answer"]
 
     assert len(llm.calls) == 2
 
@@ -311,8 +312,9 @@ def test_context_reaches_explanation_model(fake_llm, csv_file):
         in result["answer"]
     )
 
-    assert "**Original calculation**" in result["answer"]
-    assert "40.0" in result["answer"]
+    assert result["answer"] == "East generated $40.00 in profit."
+    assert "**Original calculation**" not in result["answer"]
+    assert "**AI interpretation**" not in result["answer"]
 
     assert len(llm.calls) == 2
 
@@ -451,7 +453,9 @@ def test_dictionary_result_preserves_values(
     )
 
     assert out["error"] is None
-    assert "**Original calculation**" in out["answer"]
+    assert "**Original calculation**" not in out["answer"]
+    assert "**AI interpretation**" not in out["answer"]
+    assert "unavailable" not in out["answer"].lower()
     assert "Total Sales" in out["answer"]
     assert "$375.50" in out["answer"]
     assert "Total Profit" in out["answer"]
@@ -475,8 +479,10 @@ def test_incorrect_scalar_explanation_preserves_value(
     )
 
     assert out["error"] is None
-    assert "**Original calculation**" in out["answer"]
-    assert "375.5" in out["answer"]
+    assert out["answer"] == "375.5"
+    assert "999" not in out["answer"]
+    assert "**Original calculation**" not in out["answer"]
+    assert "**AI interpretation**" not in out["answer"]
 
 
 def test_null_result_skips_explanation(
@@ -1089,7 +1095,7 @@ def test_single_group_financial_result_skips_llm(
 
     out = run_analysis(
         csv_file,
-        "Which regions have sales above 175?",
+        "Show sales and profit for regions with total sales above 175.",
         explain=True,
     )
 
@@ -1154,3 +1160,723 @@ def test_recommendation_retains_explanation_route(
     assert out["error"] is None
     assert len(llm.calls) == 2
     assert "Investigate opportunities" in out["answer"]
+
+
+
+def test_financial_sales_threshold_skips_llm(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm("result = 999")
+
+    result = run_analysis(
+        csv_file,
+        "Which regions have total sales above $100?",
+        explain=True,
+    )
+
+    assert result["error"] is None
+    assert llm.calls == []
+
+    assert result["table"] == [
+        {
+            "Region": "East",
+            "Total_Sales": 200.0,
+        },
+        {
+            "Region": "West",
+            "Total_Sales": 150.0,
+        },
+    ]
+
+
+def test_financial_margin_threshold_skips_llm(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm("result = 999")
+
+    result = run_analysis(
+        csv_file,
+        "Which regions have a profit margin below 5%?",
+        explain=True,
+    )
+
+    assert result["error"] is None
+    assert llm.calls == []
+
+    assert len(result["table"]) == 1
+    assert result["table"][0]["Region"] == "West"
+
+    assert (
+        result["table"][0]["Profit_Margin_Pct"]
+        == 3.33
+    )
+
+
+def test_financial_route_preserves_explain_false(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm("result = 123")
+
+    result = run_analysis(
+        csv_file,
+        "Which regions have total sales above $100?",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["answer"] == "123"
+    assert len(llm.calls) == 1
+
+
+
+def test_discount_relationship_uses_zero_llm_requests(
+    fake_llm,
+    tmp_path,
+):
+    llm = fake_llm(
+        AssertionError("LLM should not be called")
+    )
+
+    path = tmp_path / "discount_orders.csv"
+
+    pd.DataFrame({
+        "Category": ["Alpha", "Alpha", "Beta", "Beta"],
+        "Sales": [100, 200, 300, 400],
+        "Profit": [30, -10, 20, 60],
+        "Discount": [0.1, 0.3, 0.05, 0.15],
+    }).to_csv(path, index=False)
+
+    result = run_analysis(
+        str(path),
+        "Analyze the relationship between discount "
+        "and profitability across product categories.",
+        explain=True,
+    )
+
+    assert result["error"] is None
+    assert len(result["table"]) == 2
+    assert llm.calls == []
+
+    assert "Correlation does not establish causation" in (
+        result["answer"]
+    )
+
+
+def test_average_discount_uses_zero_llm_requests(
+    fake_llm,
+    tmp_path,
+):
+    llm = fake_llm(
+        AssertionError("LLM should not be called")
+    )
+
+    path = tmp_path / "discount_orders.csv"
+
+    pd.DataFrame({
+        "Region": ["North", "North", "South"],
+        "Discount": [0.1, 0.3, 0.4],
+    }).to_csv(path, index=False)
+
+    result = run_analysis(
+        str(path),
+        "Show average discount by region.",
+        explain=True,
+    )
+
+    assert result["error"] is None
+    assert len(result["table"]) == 2
+    assert llm.calls == []
+
+
+
+
+def test_single_row_summary_preserves_calculated_values():
+    from agent.result_formatter import summarize_single_row
+
+    records = [
+        {
+            "Campaign": "Email",
+            "Advertising_Spend": 500,
+            "Conversions": 80,
+            "Cost_Per_Conversion": 6.25,
+        },
+    ]
+
+    answer = summarize_single_row(records)
+
+    assert "Email" in answer
+    assert "$500.00" in answer
+    assert "$6.25" in answer
+    assert "80" in answer
+    assert "row(s)" not in answer
+
+
+def test_single_row_summary_preserves_correlation_warning():
+    from agent.result_formatter import summarize_single_row
+
+    records = [
+        {
+            "Category": "Furniture",
+            "Discount_Profit_Correlation": -0.4782,
+        },
+    ]
+
+    answer = summarize_single_row(records)
+
+    assert "Furniture" in answer
+    assert "-0.4782" in answer
+    assert "Correlation does not establish causation." in answer
+
+
+def test_single_row_summary_rejects_multiple_rows():
+    from agent.result_formatter import summarize_single_row
+
+    records = [
+        {"Department": "Engineering", "Salary": 100000},
+        {"Department": "Marketing", "Salary": 75000},
+    ]
+
+    assert summarize_single_row(records) is None
+
+
+def test_single_row_explanation_failure_preserves_values(
+    fake_llm,
+    csv_file,
+):
+    fake_llm(
+        "result = pd.DataFrame(["
+        "{'Campaign': 'Email', "
+        "'Cost_Per_Conversion': 6.25}])",
+        TimeoutError("Explanation timed out"),
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Which campaign has the lowest cost per conversion?",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "Email" in out["answer"]
+    assert "$6.25" in out["answer"]
+    assert "row(s)" not in out["answer"]
+    assert out["table"][0]["Cost_Per_Conversion"] == 6.25
+
+
+
+@pytest.mark.parametrize(
+    "value, explanation, expected",
+    [
+        (
+            {"ROI_Pct": 500},
+            "The return on investment is **500%**.",
+            True,
+        ),
+        (
+            {"Net_Income_Increase_Pct": 50},
+            "Net income increased by **50%** "
+            "from January to March.",
+            True,
+        ),
+        (
+            {"Total_Inventory_Value": 13430},
+            "The total inventory value is **$13,430.00**.",
+            True,
+        ),
+        (
+            {"ROI_Pct": 500},
+            "The return on investment is 500.",
+            False,
+        ),
+        (
+            {"ROI_Pct": 500},
+            "The return on investment is 5000%.",
+            False,
+        ),
+        (
+            {"Net_Income": 3000},
+            "Net income is $3,000 or $9,000.",
+            False,
+        ),
+        (
+            {"Net_Income": 3000},
+            "Net income is 3,000%.",
+            False,
+        ),
+        (
+            {"Net_Income": -3000},
+            "Net income is -$3,000.",
+            True,
+        ),
+        (
+            {"Net_Income": -3000},
+            "Net income is $3,000.",
+            False,
+        ),
+    ],
+)
+
+
+def test_single_metric_explanation_validation(
+    value,
+    explanation,
+    expected,
+):
+    from agent.result_formatter import (
+        validate_single_metric_explanation,
+    )
+
+    assert validate_single_metric_explanation(
+        explanation,
+        value,
+    ) is expected
+
+
+def test_single_metric_natural_fallback():
+    from agent.result_formatter import (
+        summarize_single_metric,
+    )
+
+    answer = summarize_single_metric(
+        {"ROI_Pct": 500}
+    )
+
+    assert "500%" in answer
+    assert answer.endswith(".")
+    assert "Calculated values" not in answer
+
+
+def test_named_percentage_explanation_accepted(
+    fake_llm,
+    csv_file,
+):
+    fake_llm(
+        "result = {'Profit_Margin_Pct': "
+        "round(df['Profit'].sum() / "
+        "df['Sales'].sum() * 100, 2)}",
+        "The profit margin is **12.65%**.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the overall profit margin percentage.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "12.65%" in out["answer"]
+    assert "Original calculation" not in out["answer"]
+
+
+def test_context_excludes_unlabeled_markdown_table():
+    from agent.conversation_context import (
+        build_conversation_context,
+    )
+
+    history = [
+        {
+            "role": "user",
+            "content": "Show revenue by department.",
+        },
+        {
+            "role": "assistant",
+            "content": (
+                "Revenue by department.\n\n"
+                "| Department | Revenue |\n"
+                "|:-----------|--------:|\n"
+                "| Engineering | $500.00 |"
+            ),
+        },
+    ]
+
+    context = build_conversation_context(history)
+
+    assert len(context) == 2
+
+    assert context[1]["content"] == (
+        "Revenue by department."
+    )
+
+
+
+def test_business_schema_reaches_analysis_model(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "marketing.csv"
+
+    pd.DataFrame({
+        "Campaign": ["Email", "Search"],
+        "Advertising_Spend": [500, 1000],
+        "Generated_Revenue": [3000, 4000],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = df['Generated_Revenue'].sum()"
+    )
+
+    result = run_analysis(
+        str(path),
+        "Calculate total campaign revenue.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["answer"] == "7000"
+
+    prompt = "\n".join(
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "user"
+    )
+
+    assert "Business schema hints" in prompt
+    assert "advertising_spend: Advertising_Spend" in prompt
+    assert "revenue: Generated_Revenue" in prompt
+    assert "campaign: Campaign" in prompt
+
+    assert len(llm.calls) == 1
+
+
+def test_ambiguous_schema_reaches_analysis_model(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "ambiguous.csv"
+
+    pd.DataFrame({
+        "Sales": [1000],
+        "Revenue": [1200],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = 'Cannot answer: clarify whether "
+        "Sales or Revenue should be used.'"
+    )
+
+    result = run_analysis(
+        str(path),
+        "Calculate total revenue.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+
+    prompt = "\n".join(
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "user"
+    )
+
+    assert "revenue: Sales, Revenue" in prompt
+    assert "AMBIGUOUS" in prompt
+
+
+def test_schema_failure_preserves_analysis(
+    fake_llm,
+    csv_file,
+    monkeypatch,
+):
+    import agent.dataset_schema as schema_module
+
+    def failed_profile(*args, **kwargs):
+        raise RuntimeError(
+            "Simulated profiling failure"
+        )
+
+    monkeypatch.setattr(
+        schema_module,
+        "profile_dataset",
+        failed_profile,
+    )
+
+    llm = fake_llm(
+        "result = df['Sales'].sum()"
+    )
+
+    result = run_analysis(
+        csv_file,
+        "What are total sales?",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["answer"] == "375.5"
+
+    prompt = "\n".join(
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "user"
+    )
+
+    assert "Sales" in prompt
+    assert "Business schema hints" not in prompt
+
+
+def test_schema_profile_runs_once_per_analysis(
+    fake_llm,
+    csv_file,
+    monkeypatch,
+):
+    import agent.dataset_schema as schema_module
+
+    original = schema_module.profile_dataset
+    calls = []
+
+    def tracked_profile(dataframe):
+        calls.append(1)
+
+        return original(dataframe)
+
+    monkeypatch.setattr(
+        schema_module,
+        "profile_dataset",
+        tracked_profile,
+    )
+
+    llm = fake_llm(
+        "result = df['Unknown_Column'].sum()",
+        "result = df['Sales'].sum()",
+    )
+
+    result = run_analysis(
+        csv_file,
+        "What are total sales?",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["answer"] == "375.5"
+
+    assert len(calls) == 1
+    assert len(llm.calls) == 2
+
+
+def test_invalid_revenue_is_blocked_before_model(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "quality.csv"
+
+    pd.DataFrame({
+        "Revenue": ["1000", "unknown", "2000"],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = 3000"
+    )
+
+    result = run_analysis(
+        str(path),
+        "Calculate total revenue.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["table"] is None
+
+    assert "1 row(s)" in result["answer"]
+    assert "2 valid numeric row(s)" in result["answer"]
+
+    assert llm.calls == []
+
+def test_formatted_numeric_text_analysis(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "formatted_revenue.csv"
+
+    pd.DataFrame({
+        "Revenue_USD": [
+            "$1,000",
+            "$2,000",
+        ],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "values = df['Revenue_USD'].str.replace("
+        "'$', '', regex=False).str.replace("
+        "',', '', regex=False)\n"
+        "result = float(pd.to_numeric(values).sum())"
+    )
+
+    result = run_analysis(
+        str(path),
+        "Calculate total revenue in USD.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["answer"] == "3000.0"
+
+    prompt = "\n".join(
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "user"
+    )
+
+    assert "formatted_numeric_text" in prompt
+
+
+def test_unrelated_date_ambiguity_does_not_block_analysis(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "ambiguous_dates.csv"
+
+    pd.DataFrame({
+        "Order_Date": [
+            "01/02/2026",
+            "03/04/2026",
+        ],
+        "Revenue": [1000, 2000],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = float(df['Revenue'].sum())"
+    )
+
+    result = run_analysis(
+        str(path),
+        "Calculate total revenue.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["answer"] == "3000.0"
+
+    prompt = "\n".join(
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "user"
+    )
+
+    assert "ambiguous_date_convention" in prompt
+
+
+
+def test_ambiguous_dates_block_model_generation(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "ambiguous_dates.csv"
+
+    pd.DataFrame({
+        "Order_Date": [
+            "01/02/2026",
+            "03/04/2026",
+        ],
+        "Revenue": [1000, 2000],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm("result = 3000")
+
+    result = run_analysis(
+        str(path),
+        "Calculate monthly revenue.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["table"] is None
+
+    assert "MM/DD/YYYY" in result["answer"]
+    assert "DD/MM/YYYY" in result["answer"]
+
+    assert llm.calls == []
+
+
+def test_mixed_discount_scale_blocks_model_generation(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "mixed_discounts.csv"
+
+    pd.DataFrame({
+        "Discount": [0.15, 20, 0.10, 30],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm("result = 18.75")
+
+    result = run_analysis(
+        str(path),
+        "Calculate average discount percentage.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["table"] is None
+
+    assert "discount units" in result["answer"]
+
+    assert llm.calls == []
+
+
+def test_invalid_revenue_does_not_block_quantity(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "invalid_revenue.csv"
+
+    pd.DataFrame({
+        "Revenue": ["1000", "unknown", "2000"],
+        "Quantity": [10, 20, 30],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = int(df['Quantity'].sum())"
+    )
+
+    result = run_analysis(
+        str(path),
+        "Calculate total quantity.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert result["answer"] == "60"
+
+    assert len(llm.calls) == 1
+
+
+def test_quality_hints_reach_model_for_explicit_exclusions(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "partial_revenue.csv"
+
+    pd.DataFrame({
+        "Revenue": ["1000", "unknown", "2000"],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "values = pd.to_numeric("
+        "df['Revenue'], errors='coerce')\n"
+        "valid = values.notna() & np.isfinite(values)\n"
+        "result = {"
+        "'Valid_Revenue': float(values[valid].sum()), "
+        "'Excluded_Rows': int((~valid).sum())}"
+    )
+
+    result = run_analysis(
+        str(path),
+        "Calculate the sum of only the valid finite revenue "
+        "values and report how many rows were excluded.",
+        explain=False,
+    )
+
+    assert result["error"] is None
+    assert len(llm.calls) == 1
+
+    prompt = "\n".join(
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "user"
+    )
+
+    assert "partially_numeric_text" in prompt
+    assert "invalid numeric values=1" in prompt
+    assert "3000" in result["answer"]

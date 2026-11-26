@@ -13,6 +13,7 @@ from agent.conversation_context import (
     build_conversation_context,
 )
 from agent.contextual_metrics import try_contextual_analysis
+from agent.financial_metrics import try_financial_analysis
 from agent.debug_logger import debug_log, DebugTimer
 from agent.result_formatter import (
     escape_text,
@@ -21,6 +22,9 @@ from agent.result_formatter import (
     extract_record_table,
     describe_record_table,
     summarize_financial_table,
+    summarize_single_row,
+    summarize_single_metric,
+    validate_single_metric_explanation,
 )
 from agent.time_budget import (
     AnalysisBudgetExceeded,
@@ -660,6 +664,35 @@ def run_analysis(
                 "No matching contextual metrics intent",
             )
 
+            debug_log(
+                "ROUTER",
+                "Checking deterministic financial metrics",
+            )
+
+            route_timer = DebugTimer("FINANCIAL ROUTE")
+
+            financial_result = try_financial_analysis(
+                df,
+                question,
+            )
+
+            if financial_result is not None:
+                route_timer.finish(
+                    "Financial metrics handled request"
+                )
+
+                debug_log(
+                    "ROUTER",
+                    "Selected deterministic financial analysis",
+                )
+
+                return financial_result
+
+            debug_log(
+                "ROUTER",
+                "No matching deterministic financial metrics intent",
+            )
+
         else:
             debug_log(
                 "ROUTER",
@@ -731,15 +764,93 @@ def run_agent(df, question, explain, context=None):
 
         import_timer.finish("Initial AI dependencies loaded")
 
+        # Step 4A: Profile the dataset for business
+        # concepts before generating analytical code.
+        schema_timer = DebugTimer("SCHEMA")
+
+        debug_log(
+            "SCHEMA",
+            "Preparing business dataset profile",
+        )
+
+        dataset_schema = None
+
+        try:
+            from agent.dataset_schema import (
+                profile_dataset,
+            )
+
+            dataset_schema = profile_dataset(df)
+
+            debug_log(
+                "SCHEMA",
+                f"Unique candidate concepts: "
+                f"{len(dataset_schema['unique_candidates'])}",
+            )
+
+            debug_log(
+                "SCHEMA",
+                f"Ambiguous candidate concepts: "
+                f"{len(dataset_schema['ambiguous_candidates'])}",
+            )
+
+            schema_timer.finish(
+                "Business dataset profile prepared"
+            )
+
+        except Exception as exc:
+            debug_log(
+                "SCHEMA ERROR",
+                f"Dataset profiling failed: "
+                f"{type(exc).__name__}",
+            )
+
+            debug_log(
+                "SCHEMA",
+                "Continuing with original column descriptions",
+            )
+
+            schema_timer.finish(
+                "Dataset profiling fallback activated"
+            )
+
+            dataset_schema = None
+
+        # Step 4B: Validate data integrity against
+        # the current business question.
+        from agent.data_integrity import (
+            validate_analysis_integrity,
+        )
+
+        integrity_result = validate_analysis_integrity(
+            question,
+            dataset_schema,
+        )
+
+        if integrity_result is not None:
+            debug_log(
+                "ROUTER",
+                "Selected data-integrity clarification response",
+            )
+
+            debug_log(
+                "INTEGRITY",
+                "Skipping model generation and sandbox execution",
+            )
+
+            return integrity_result
+
         # Step 4: Build the analysis prompt.
         debug_log(
             "PROMPT",
             "Preparing analysis prompt",
         )
+
         prompt = build_analysis_prompt(
             question,
             df,
             context=context,
+            dataset_schema=dataset_schema,
         )
 
         debug_log(
@@ -878,6 +989,20 @@ def run_agent(df, question, explain, context=None):
         f"{hide_secrets(plain_answer)}",
     )
 
+    # Prepare a natural fallback for one named metric.
+    if explain:
+        single_metric_answer = summarize_single_metric(
+            result_value,
+        )
+
+        if single_metric_answer is not None:
+            plain_answer = single_metric_answer
+
+            debug_log(
+                "RESULT INTEGRITY",
+                "Natural single-metric fallback prepared",
+            )
+
     # Convert suitable structured results into supporting tables.
     structured_table = None
     structured_table_name = None
@@ -910,6 +1035,27 @@ def run_agent(df, question, explain, context=None):
             f"Structured answer length: "
             f"{len(plain_answer)} characters",
         )
+
+    if explain and result_type == "table":
+        single_row_summary = summarize_single_row(
+            result_value,
+        )
+
+        if single_row_summary is not None:
+            plain_answer = single_row_summary
+
+            debug_log(
+                "RESULT INTEGRITY",
+                "Single-row fallback contains calculated values",
+            )
+
+        elif not result_value:
+            plain_answer = "No matching results were found."
+
+            debug_log(
+                "RESULT FORMAT",
+                "Empty table fallback prepared",
+            )
 
     # Attempt deterministic interpretation of supported
     # native financial tables before requesting an explanation.
@@ -1119,10 +1265,7 @@ def describe_plainly(last):
             for item in value
         ]
 
-        text = (
-            f"**Calculated results ({len(value)}):**\n\n"
-            + "\n".join(lines)
-        )
+        text = "\n".join(lines)
 
     elif isinstance(value, dict):
         debug_log(
@@ -1141,10 +1284,7 @@ def describe_plainly(last):
             for key, item in value.items()
         ]
 
-        text = (
-            "**Calculated values:**\n\n"
-            + "\n".join(lines)
-        )
+        text = "\n".join(lines)
 
     else:
         debug_log(
@@ -1332,12 +1472,21 @@ def explain_result(
         "alongside the AI explanation",
     )
 
-    answer = (
-        "**AI interpretation**\n\n"
-        + text
-        + "\n\n---\n\n"
-        + "**Original calculation**\n\n"
-        + plain_answer
+    if validate_single_metric_explanation(
+        text,
+        value,
+    ):
+        debug_log(
+            "RESULT INTEGRITY",
+            "Validated natural-language explanation accepted",
+        )
+
+        return text
+
+    debug_log(
+        "RESULT INTEGRITY",
+        "Explanation validation unavailable or unsuccessful; "
+        "using original calculated values",
     )
 
-    return answer
+    return plain_answer
