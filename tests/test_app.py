@@ -446,7 +446,11 @@ def test_analysis_with_chart():
         )
 
     assert "Profit by category." in answer
-    assert "Supporting Data" in answer
+    assert "Supporting Data" not in answer
+    assert "Technology" in answer
+    assert "Furniture" in answer
+    assert "$1,000.00" in answer
+    assert "$200.00" in answer
     assert figure is not None
     assert figure.data[0].type == "bar"
 
@@ -500,7 +504,11 @@ def test_chart_failure_preserves_answer():
             )
 
     assert "Profit by category." in answer
-    assert "Supporting Data" in answer
+    assert "Supporting Data" not in answer
+    assert "Technology" in answer
+    assert "Furniture" in answer
+    assert "$1,000.00" in answer
+    assert "$200.00" in answer
     assert figure is None
 
 def test_followup_receives_previous_context():

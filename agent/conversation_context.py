@@ -1,6 +1,7 @@
 """Build bounded conversation context for follow-up analysis."""
 
 import json
+import re
 
 
 MAX_CONTEXT_TURNS = 3
@@ -87,9 +88,30 @@ def build_conversation_context(history):
                 continue
 
             # Exclude potentially large supporting tables.
+            # Retain compatibility with older chat responses.
             answer = content.split(
                 "### Supporting Data", 1
             )[0].strip()
+
+            answer_lines = answer.splitlines()
+
+            for index in range(len(answer_lines) - 1):
+                header = answer_lines[index].strip()
+                separator = answer_lines[index + 1].strip()
+
+                if (
+                    header.startswith("|")
+                    and header.endswith("|")
+                    and re.fullmatch(
+                        r"\|(?:\s*:?-{3,}:?\s*\|)+",
+                        separator,
+                    )
+                ):
+                    answer = "\n".join(
+                        answer_lines[:index]
+                    ).strip()
+
+                    break
 
             if not answer:
                 continue

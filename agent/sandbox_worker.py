@@ -19,6 +19,7 @@ import builtins
 import contextlib
 import io
 import json
+import math
 import os
 import pickle
 import sys
@@ -109,6 +110,234 @@ def _restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
                           f"available. Allowed modules: {', '.join(sorted(ALLOWED_IMPORTS))}.")
     return builtins.__import__(name, globals, locals, fromlist, level)
 
+def _count_inversions(values):
+    """Count strict inversions using merge sort."""
+
+    size = len(values)
+
+    if size <= 1:
+        return 0
+
+    middle = size // 2
+
+    left = values[:middle]
+    right = values[middle:]
+
+    count = (
+        _count_inversions(left)
+        + _count_inversions(right)
+    )
+
+    i = 0
+    j = 0
+    k = 0
+
+    while i < len(left) and j < len(right):
+        if left[i] <= right[j]:
+            values[k] = left[i]
+            i += 1
+        else:
+            values[k] = right[j]
+            j += 1
+
+            count += len(left) - i
+
+        k += 1
+
+    while i < len(left):
+        values[k] = left[i]
+        i += 1
+        k += 1
+
+    while j < len(right):
+        values[k] = right[j]
+        j += 1
+        k += 1
+
+    return count
+
+
+def _count_tied_pairs(values):
+    """Count pairs sharing an identical value."""
+
+    counts = {}
+
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+
+    return sum(
+        count * (count - 1) // 2
+        for count in counts.values()
+    )
+
+
+def _kendall_tau_b(x, y):
+    """Calculate Kendall tau-b with tie correction."""
+
+    n = len(x)
+
+    if n < 2:
+        return float("nan")
+
+    total_pairs = n * (n - 1) // 2
+
+    ties_x = _count_tied_pairs(x)
+    ties_y = _count_tied_pairs(y)
+
+    pairs = sorted(zip(x, y))
+
+    ties_both = _count_tied_pairs(pairs)
+
+    sorted_y = [
+        pair[1]
+        for pair in pairs
+    ]
+
+    discordant = _count_inversions(sorted_y)
+
+    comparable_pairs = (
+        total_pairs
+        - ties_x
+        - ties_y
+        + ties_both
+    )
+
+    numerator = (
+        comparable_pairs
+        - 2 * discordant
+    )
+
+    denominator = math.sqrt(
+        (total_pairs - ties_x)
+        * (total_pairs - ties_y)
+    )
+
+    if denominator == 0:
+        return float("nan")
+
+    return numerator / denominator
+
+
+def safe_correlation(
+    left,
+    right,
+    method="pearson",
+):
+    """Calculate correlation without requiring SciPy."""
+
+    if not isinstance(method, str):
+        raise TypeError(
+            "Correlation method must be a string."
+        )
+
+    method = method.strip().lower()
+
+    if method not in {
+        "pearson",
+        "spearman",
+        "kendall",
+    }:
+        raise ValueError(
+            "Supported correlation methods: "
+            "pearson, spearman, kendall."
+        )
+
+    if not isinstance(left, pd.Series):
+        raise TypeError(
+            "Left correlation input must be a pandas Series."
+        )
+
+    if not isinstance(right, pd.Series):
+        raise TypeError(
+            "Right correlation input must be a pandas Series."
+        )
+
+    if not left.index.is_unique or not right.index.is_unique:
+        raise ValueError(
+            "Correlation inputs require unique indexes."
+        )
+
+    left, right = left.align(
+        right,
+        join="inner",
+    )
+
+    left = pd.to_numeric(
+        left,
+        errors="raise",
+    )
+
+    right = pd.to_numeric(
+        right,
+        errors="raise",
+    )
+
+    if (
+        pd.api.types.is_complex_dtype(left.dtype)
+        or pd.api.types.is_complex_dtype(right.dtype)
+    ):
+        raise ValueError(
+            "Complex correlation inputs are unsupported."
+        )
+
+    x = left.to_numpy(
+        dtype=float,
+        na_value=np.nan,
+    )
+
+    y = right.to_numpy(
+        dtype=float,
+        na_value=np.nan,
+    )
+
+    valid = (
+        np.isfinite(x)
+        & np.isfinite(y)
+    )
+
+    x = x[valid]
+    y = y[valid]
+
+    if len(x) < 2:
+        return float("nan")
+
+    if (
+        np.all(x == x[0])
+        or np.all(y == y[0])
+    ):
+        return float("nan")
+
+    if method == "pearson":
+        return float(
+            pd.Series(x).corr(
+                pd.Series(y),
+                method="pearson",
+            )
+        )
+
+    if method == "spearman":
+        ranked_x = pd.Series(x).rank(
+            method="average"
+        )
+
+        ranked_y = pd.Series(y).rank(
+            method="average"
+        )
+
+        return float(
+            ranked_x.corr(
+                ranked_y,
+                method="pearson",
+            )
+        )
+
+    return float(
+        _kendall_tau_b(
+            x.tolist(),
+            y.tolist(),
+        )
+    )
+
 def _json_default(obj):
     """Handle unknown type."""
     if isinstance(obj, np.generic):
@@ -162,8 +391,9 @@ def _run(code: str, df: pd.DataFrame, stdout: io.StringIO, max_rows: int) -> dic
         "__name__": "__sandbox__",
         "pd": pd,
         "np": np,
-        "df": df
-        }
+        "df": df,
+        "safe_correlation": safe_correlation,
+    }
 
     with contextlib.redirect_stdout(stdout):
         exec(compile(code, LLM_FILENAME, "exec"), env)

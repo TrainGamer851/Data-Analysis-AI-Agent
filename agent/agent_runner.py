@@ -24,7 +24,12 @@ from agent.result_formatter import (
     summarize_financial_table,
     summarize_single_row,
     summarize_single_metric,
+    summarize_scalar_correlation,
+    extract_single_correlation,
+    summarize_correlation_interpretation,
+    summarize_multiple_metrics,
     validate_single_metric_explanation,
+    validate_multiple_metric_explanation,
 )
 from agent.time_budget import (
     AnalysisBudgetExceeded,
@@ -989,19 +994,141 @@ def run_agent(df, question, explain, context=None):
         f"{hide_secrets(plain_answer)}",
     )
 
-    # Prepare a natural fallback for one named metric.
+
+    # Determine whether the question requires interpretation
+    # beyond presenting the calculated numerical values.
+    # Generic analysis requests do not automatically
+    # require an additional LLM explanation.
+    # Retain the explanation route for explicit
+    # interpretation, recommendations and forecasts.
+    needs_extended_interpretation = bool(
+        re.search(
+            r"\b(recommend\w*|suggest\w*|"
+            r"forecast\w*|predict\w*|why|"
+            r"strateg\w*|advice|should|"
+            r"explain\w*|interpret\w*|"
+            r"implication\w*|insight\w*|"
+            r"cause\w*|reason\w*|"
+            r"evaluat\w*|assess\w*)\b",
+            question.lower(),
+        )
+    )
+
+
+    debug_log(
+        "EXPLANATION ROUTER",
+        f"Extended interpretation requested: "
+        f"{needs_extended_interpretation}",
+    )
+
+    numeric_summary = None
+    statistical_summary = None
+
+    # Prepare a natural fallback for named metrics
+    # and supported scalar correlation calculations.
     if explain:
+        summary_timer = DebugTimer(
+            "NUMERIC SUMMARY"
+        )
+
         single_metric_answer = summarize_single_metric(
             result_value,
         )
 
         if single_metric_answer is not None:
             plain_answer = single_metric_answer
+            numeric_summary = single_metric_answer
 
             debug_log(
                 "RESULT INTEGRITY",
                 "Natural single-metric fallback prepared",
             )
+
+        else:
+            multi_metric_answer = (
+                summarize_multiple_metrics(
+                    result_value,
+                )
+            )
+
+            if multi_metric_answer is not None:
+                plain_answer = multi_metric_answer
+                numeric_summary = multi_metric_answer
+
+                debug_log(
+                    "RESULT INTEGRITY",
+                    "Natural multi-metric fallback prepared",
+                )
+
+        # Handle supported scalar and named correlation
+        # results without trusting generated narrative fields.
+        if result_type in ("scalar", "object"):
+            debug_log(
+                "RESULT INTEGRITY",
+                "Checking scalar result for supported "
+                "correlation presentation",
+            )
+
+            coefficient = extract_single_correlation(
+                question,
+                result_value,
+            )
+
+            if coefficient is not None:
+                scalar_correlation_answer = (
+                    summarize_scalar_correlation(
+                        question,
+                        coefficient,
+                    )
+                )
+
+                plain_answer = scalar_correlation_answer
+                numeric_summary = scalar_correlation_answer
+
+                debug_log(
+                    "RESULT INTEGRITY",
+                    "Natural scalar correlation fallback prepared",
+                )
+
+                if needs_extended_interpretation:
+                    statistical_summary = (
+                        summarize_correlation_interpretation(
+                            question,
+                            result_value,
+                        )
+                    )
+
+                    if statistical_summary is not None:
+                        plain_answer = statistical_summary
+
+                        debug_log(
+                            "STATISTICAL ACCURACY",
+                            "Using deterministic correlation "
+                            "interpretation",
+                        )
+
+                        debug_log(
+                            "RESULT INTEGRITY",
+                            "Statistical interpretation does "
+                            "not require generated narrative",
+                        )
+
+        if numeric_summary is not None:
+            summary_timer.finish(
+                "Deterministic numerical summary prepared"
+            )
+
+            debug_log(
+                "EXPLANATION ROUTER",
+                "Calculated metrics can be presented "
+                "without additional model generation",
+            )
+
+        else:
+            summary_timer.finish(
+                "Deterministic numerical summary unavailable"
+            )
+
 
     # Convert suitable structured results into supporting tables.
     structured_table = None
@@ -1071,17 +1198,8 @@ def run_agent(df, question, explain, context=None):
             "Checking native table for financial insights",
         )
 
-        # Preserve the AI explanation route for questions
-        # explicitly requesting recommendations or forecasts.
-        needs_extended_interpretation = bool(
-            re.search(
-                r"\b(recommend\w*|suggest\w*|"
-                r"forecast\w*|predict\w*|why|"
-                r"strateg\w*|advice|should)\b",
-                question.lower(),
-            )
-        )
-
+        # Reuse the interpretation decision prepared
+        # before numerical result formatting.
         if needs_extended_interpretation:
             debug_log(
                 "DETERMINISTIC SUMMARY",
@@ -1113,11 +1231,52 @@ def run_agent(df, question, explain, context=None):
                 "Deterministic summary unavailable"
             )
 
+
+    # A supported numerical summary does not require
+    # another model request unless extended interpretation
+    # was explicitly requested.
+    direct_numeric_result = (
+        numeric_summary is not None
+        and (
+            not needs_extended_interpretation
+            or statistical_summary is not None
+        )
+    )
+
+    if statistical_summary is not None:
+        debug_log(
+            "EXPLANATION ROUTER",
+            "Supported statistical interpretation "
+            "completed deterministically",
+        )
+
+    if direct_numeric_result:
+        debug_log(
+            "OPTIMIZATION",
+            "Skipping redundant numerical explanation request",
+        )
+
+        debug_log(
+            "OPTIMIZATION",
+            "LLM explanation requests avoided: 1",
+        )
+
+    elif (
+        numeric_summary is not None
+        and needs_extended_interpretation
+    ):
+        debug_log(
+            "EXPLANATION ROUTER",
+            "Extended interpretation requested; "
+            "retaining explanation route",
+        )
+
     # Structured tables, supported financial summaries,
-    # lists and missing values can be presented without
-    # another model request.
+    # named numerical metrics, lists and missing values
+    # can be presented without another model request.
     direct_result = (
-        financial_summary is not None
+        direct_numeric_result
+        or financial_summary is not None
         or structured_table is not None
         or (
             result_type == "object"
@@ -1131,6 +1290,12 @@ def run_agent(df, question, explain, context=None):
     )
 
     should_explain = explain and not direct_result
+
+    debug_log(
+        "EXPLANATION ROUTER",
+        f"Explanation model required: {should_explain}",
+    )
+
 
     debug_log(
         "ANSWER",
@@ -1472,14 +1637,50 @@ def explain_result(
         "alongside the AI explanation",
     )
 
-    if validate_single_metric_explanation(
-        text,
-        value,
-    ):
+    if isinstance(value, dict) and len(value) > 1:
+        explanation_valid = (
+            validate_multiple_metric_explanation(
+                text,
+                value,
+            )
+        )
+
+    else:
+        explanation_valid = (
+            validate_single_metric_explanation(
+                text,
+                value,
+            )
+        )
+
+    if explanation_valid:
         debug_log(
             "RESULT INTEGRITY",
             "Validated natural-language explanation accepted",
         )
+
+        disclaimer = (
+            "Correlation does not establish causation."
+        )
+
+        if disclaimer.lower() in plain_answer.lower():
+            debug_log(
+                "STATISTICAL ACCURACY",
+                "Calculated result requires correlation disclaimer",
+            )
+
+            if disclaimer.lower() not in text.lower():
+                text += "\n\n" + disclaimer
+
+                debug_log(
+                    "STATISTICAL ACCURACY",
+                    "Correlation disclaimer appended",
+                )
+            else:
+                debug_log(
+                    "STATISTICAL ACCURACY",
+                    "Correlation disclaimer already present",
+                )
 
         return text
 

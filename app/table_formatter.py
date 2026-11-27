@@ -4,11 +4,23 @@ from numbers import Real, Integral
 
 import pandas as pd
 
+from agent.currency_units import (
+    get_explicit_currency,
+    format_currency,
+)
+
+from agent.debug_logger import debug_log, DebugTimer
+
 
 MONEY_COLUMNS = {
     "sales",
     "total sales",
     "average sales",
+    "average group sales",
+    "average total sales",
+    "average sales threshold",
+    "avg sales threshold",
+    "sales threshold",
     "revenue",
     "total revenue",
     "profit",
@@ -21,6 +33,26 @@ MONEY_COLUMNS = {
     "unit cost",
     "price",
     "unit price",
+    "total net profit",
+    "total gross profit",
+    "generated revenue",
+    "total generated revenue",
+    "operating expenses",
+    "total operating expenses",
+    "fixed costs",
+    "variable costs",
+    "unit variable cost",
+    "unit selling price",
+    "cost of goods sold",
+    "cogs",
+    "customer acquisition cost",
+    "acquisition cost",
+    "investment cost",
+    "investment return",
+    "shipping cost",
+    "total shipping cost",
+    "average shipping cost",
+    "customer lifetime value",
     "average price",
     "average order value",
     "aov",
@@ -30,6 +62,49 @@ MONEY_COLUMNS = {
     "marketing budget",
     "loss",
     "total loss",
+    "salary",
+    "average salary",
+    "avg salary",
+    "total salary",
+    "salary difference",
+    "average salary difference",
+    "income",
+    "total income",
+    "net income",
+    "net revenue",
+    "expense",
+    "total expense",
+    "inventory value",
+    "total inventory value",
+    "stock value",
+    "advertising spend",
+    "total advertising spend",
+    "marketing spend",
+    "cost per conversion",
+    "cost per acquisition",
+    "cost per click",
+    "average cost",
+    "avg cost",
+    "total net profit",
+    "total gross profit",
+    "generated revenue",
+    "total generated revenue",
+    "operating expenses",
+    "total operating expenses",
+    "fixed costs",
+    "variable costs",
+    "unit variable cost",
+    "unit selling price",
+    "cost of goods sold",
+    "cogs",
+    "customer acquisition cost",
+    "acquisition cost",
+    "investment cost",
+    "investment return",
+    "shipping cost",
+    "total shipping cost",
+    "average shipping cost",
+    "customer lifetime value",
 }
 
 PERCENTAGE_COLUMNS = {
@@ -64,6 +139,17 @@ COUNT_COLUMNS = {
     "units sold",
     "number of orders",
     "number of customers",
+    "stock on hand",
+    "reorder level",
+    "shortage",
+    "additional quantity",
+    "required quantity",
+    "conversions",
+    "clicks",
+    "impressions",
+    "employees",
+    "employee count",
+    "total employees",
 }
 
 
@@ -111,6 +197,13 @@ def get_column_type(column):
     }:
         return "discount_value"
 
+    # Explicit currency suffixes take priority over
+    # traditional monetary column names.
+    currency = get_explicit_currency(column)
+
+    if currency is not None:
+        return f"money:{currency}"
+
     if name in MONEY_COLUMNS:
         return "money"
 
@@ -144,11 +237,22 @@ def format_value(value, column_type):
 
         return str(value)
 
-    if column_type == "money":
-        if value < 0:
-            return f"-${abs(value):,.2f}"
+    # Format explicitly identified currencies.
+    if column_type.startswith("money:"):
+        currency = column_type.split(":", 1)[1]
 
-        return f"${value:,.2f}"
+        return format_currency(
+            value,
+            currency,
+        )
+
+    # Preserve historical dollar formatting for
+    # monetary columns without explicit currency units.
+    if column_type == "money":
+        return format_currency(
+            value,
+            "USD",
+        )
 
     if column_type == "percentage":
         return f"{value:,.2f}%"
@@ -174,10 +278,34 @@ def format_value(value, column_type):
 def format_business_table(df):
     """Return a formatted copy for display purposes only."""
 
+    timer = DebugTimer("TABLE FORMAT")
+
+    debug_log(
+        "TABLE FORMAT",
+        f"Preparing business table | "
+        f"Rows: {len(df):,} | "
+        f"Columns: {len(df.columns):,}",
+    )
+
     formatted = df.copy()
 
     for column in formatted.columns:
         column_type = get_column_type(column)
+
+        debug_log(
+            "TABLE FORMAT",
+            f"Column: {column} | "
+            f"Display type: {column_type}",
+        )
+
+        if column_type.startswith("money:"):
+            currency = column_type.split(":", 1)[1]
+
+            debug_log(
+                "TABLE FORMAT",
+                f"Explicit currency detected: {currency} | "
+                f"Column: {column}",
+            )
 
         formatted[column] = formatted[column].map(
             lambda value: format_value(
@@ -185,6 +313,10 @@ def format_business_table(df):
                 column_type,
             )
         )
+
+    timer.finish(
+        "Business table formatting completed"
+    )
 
     return formatted
 

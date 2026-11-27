@@ -691,10 +691,9 @@ def try_contextual_analysis(df, question, context=None):
         direction = "higher" if difference > 0 else "lower"
 
         return response(
-            f"**{selected}** has "
-            f"**{money(abs(difference))} {direction}** "
-            f"total {metric.lower()} than "
-            f"**{reference}**."
+            f"**{selected}**'s total {metric.lower()} "
+            f"is **{money(abs(difference))} {direction}** "
+            f"than **{reference}**'s."
         )
 
     if kind == "year_value":

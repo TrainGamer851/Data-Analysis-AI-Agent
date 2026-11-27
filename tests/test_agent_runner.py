@@ -460,7 +460,7 @@ def test_dictionary_result_preserves_values(
     assert "$375.50" in out["answer"]
     assert "Total Profit" in out["answer"]
     assert "$47.50" in out["answer"]
-    assert len(llm.calls) == 2
+    assert len(llm.calls) == 1
 
 
 def test_incorrect_scalar_explanation_preserves_value(
@@ -1444,7 +1444,7 @@ def test_single_metric_natural_fallback():
         {"ROI_Pct": 500}
     )
 
-    assert "500%" in answer
+    assert "500.00%" in answer
     assert answer.endswith(".")
     assert "Calculated values" not in answer
 
@@ -1880,3 +1880,784 @@ def test_quality_hints_reach_model_for_explicit_exclusions(
     assert "partially_numeric_text" in prompt
     assert "invalid numeric values=1" in prompt
     assert "3000" in result["answer"]
+
+
+
+# --------------------------------------------------
+# Multi-metric result integrity
+# --------------------------------------------------
+
+@pytest.mark.parametrize(
+    "explanation",
+    [
+        (
+            "The total valid revenue is "
+            "$375.50, excluding 0 rows."
+        ),
+        (
+            "The total valid revenue is "
+            "$900.00, excluding 0 rows."
+        ),
+        (
+            "The total valid revenue is "
+            "$375.50, excluding 5 rows."
+        ),
+        (
+            "The total valid revenue is "
+            "€375.50, excluding 0 rows."
+        ),
+    ],
+)
+def test_multi_metric_result_integrity(
+    fake_llm,
+    csv_file,
+    explanation,
+):
+    llm = fake_llm(
+        "result = {"
+        "'Total_Valid_Revenue_USD': "
+        "float(df['Sales'].sum()), "
+        "'Excluded_Rows': 0}",
+        explanation,
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate valid finite sales revenue "
+        "and report the number of excluded rows.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+
+    answer = out["answer"].replace("**", "")
+
+    assert answer == (
+        "The total valid revenue is "
+        "$375.50, excluding 0 rows."
+    )
+
+    assert len(llm.calls) == 1
+
+
+def test_multi_metric_explanation_failure(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {"
+        "'Total_Valid_Revenue_USD': "
+        "float(df['Sales'].sum()), "
+        "'Excluded_Rows': 0}",
+        ConnectionError("Explanation failed"),
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate valid finite sales revenue "
+        "and explain the number of excluded rows.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+
+    assert out["answer"] == (
+        "The total valid revenue is "
+        "**$375.50**, excluding **0 rows**."
+    )
+
+    assert len(llm.calls) == 2
+
+
+def test_explicit_eur_explanation_validation(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "euro_revenue.csv"
+
+    pd.DataFrame({
+        "Revenue_EUR": [3000, 5000],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = {'Total_Revenue_EUR': "
+        "float(df['Revenue_EUR'].sum())}",
+        "The total revenue is €8,000.00.",
+    )
+
+    out = run_analysis(
+        str(path),
+        "Calculate and explain the total Revenue_EUR.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+
+    assert out["answer"] == (
+        "The total revenue is €8,000.00."
+    )
+
+    assert len(llm.calls) == 2
+
+
+
+# --------------------------------------------------
+# Numerical precision and explanation optimization
+# --------------------------------------------------
+
+@pytest.mark.parametrize(
+    "currency, expected",
+    [
+        ("USD", "$375.57"),
+        ("EUR", "€375.57"),
+        ("GBP", "£375.57"),
+        ("CAD", "CAD 375.57"),
+        ("AUD", "AUD 375.57"),
+    ],
+)
+def test_named_currency_skips_explanation(
+    fake_llm,
+    tmp_path,
+    currency,
+    expected,
+):
+    column = f"Revenue_{currency}"
+
+    path = tmp_path / "currency_precision.csv"
+
+    pd.DataFrame({
+        column: [100.1234, 275.4444],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        f"result = {{'Total_Revenue_{currency}': "
+        f"float(df['{column}'].sum())}}",
+    )
+
+    out = run_analysis(
+        str(path),
+        f"Calculate the total {column}.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+    assert expected in out["answer"]
+
+    assert len(llm.calls) == 1
+
+
+def test_negative_monetary_precision(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "negative_profit.csv"
+
+    pd.DataFrame({
+        "Net_Profit_USD": [-100.1234, -25.4444],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = {'Total_Net_Profit_USD': "
+        "float(df['Net_Profit_USD'].sum())}",
+    )
+
+    out = run_analysis(
+        str(path),
+        "Calculate the total Net_Profit_USD.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "-$125.57" in out["answer"]
+    assert len(llm.calls) == 1
+
+
+def test_named_percentage_skips_explanation(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {'Profit_Margin_Pct': "
+        "float(df['Profit'].sum() / "
+        "df['Sales'].sum() * 100)}",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the overall profit margin percentage.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "12.65%" in out["answer"]
+    assert len(llm.calls) == 1
+
+
+def test_multiple_named_metrics_skip_explanation(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {"
+        "'Total_Sales': float(df['Sales'].sum()), "
+        "'Total_Profit': float(df['Profit'].sum()), "
+        "'Profit_Margin_Pct': "
+        "float(df['Profit'].sum() / "
+        "df['Sales'].sum() * 100)}",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate combined sales and profit metrics.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+
+    assert "$375.50" in out["answer"]
+    assert "$47.50" in out["answer"]
+    assert "12.65%" in out["answer"]
+
+    assert len(llm.calls) == 1
+
+
+def test_extended_interpretation_retains_model(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "revenue.csv"
+
+    pd.DataFrame({
+        "Revenue_EUR": [1000, 2000],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = {'Total_Revenue_EUR': "
+        "float(df['Revenue_EUR'].sum())}",
+        "The total revenue is €3,000.00.",
+    )
+
+    out = run_analysis(
+        str(path),
+        "Calculate and explain the total Revenue_EUR.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+
+    assert out["answer"] == (
+        "The total revenue is €3,000.00."
+    )
+
+    assert len(llm.calls) == 2
+
+
+def test_unsupported_scalar_retains_explanation(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = float(df['Sales'].sum())",
+        "The total sales are $375.50.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "What are total sales?",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["answer"] == (
+        "The total sales are $375.50."
+    )
+
+    assert len(llm.calls) == 2
+
+
+def test_precision_instructions_reach_model(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = float(df['Sales'].sum())",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate total sales.",
+        explain=False,
+    )
+
+    assert out["error"] is None
+
+    system_prompt = "\n".join(
+        message["content"]
+        for message in llm.calls[0]
+        if message["role"] == "system"
+    )
+
+    assert "Never use int()" in system_prompt
+    assert "Preserve full numerical precision" in system_prompt
+    assert "Do not add a USD suffix" in system_prompt
+
+
+
+# --------------------------------------------------
+# Scalar correlation integration
+# --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "Pearson",
+        "Spearman",
+        "Kendall",
+    ],
+)
+def test_scalar_correlation_skips_explanation(
+    fake_llm,
+    tmp_path,
+    method,
+):
+    path = tmp_path / "correlation.csv"
+
+    pd.DataFrame({
+        "Metric_A": [1, 2, 3, 4],
+        "Metric_B": [2, 4, 6, 8],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = safe_correlation("
+        "df['Metric_A'], df['Metric_B'], "
+        f"method='{method.lower()}')"
+    )
+
+    out = run_analysis(
+        str(path),
+        f"Calculate the {method} correlation "
+        "between Metric_A and Metric_B.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+
+    assert out["answer"] == (
+        f"The {method} correlation coefficient "
+        "is **1.0000**.\n\n"
+        "Correlation does not establish causation."
+    )
+
+    assert len(llm.calls) == 1
+
+
+def test_scalar_negative_correlation(
+    fake_llm,
+    tmp_path,
+):
+    path = tmp_path / "negative_correlation.csv"
+
+    pd.DataFrame({
+        "Metric_A": [1, 2, 3, 4],
+        "Metric_B": [8, 6, 4, 2],
+    }).to_csv(path, index=False)
+
+    llm = fake_llm(
+        "result = float("
+        "df['Metric_A'].corr(df['Metric_B']))"
+    )
+
+    out = run_analysis(
+        str(path),
+        "Calculate the Pearson correlation "
+        "between Metric_A and Metric_B.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+
+    assert out["answer"] == (
+        "The Pearson correlation coefficient "
+        "is **-1.0000**.\n\n"
+        "Correlation does not establish causation."
+    )
+
+    assert len(llm.calls) == 1
+
+
+def test_scalar_correlation_benchmark_precision(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = 0.048992244529133366",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+
+    assert out["answer"] == (
+        "The Pearson correlation coefficient "
+        "is **0.0490**.\n\n"
+        "Correlation does not establish causation."
+    )
+
+    assert len(llm.calls) == 1
+
+
+def test_scalar_correlation_extended_fallback(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = 0.048992244529133366",
+        TimeoutError("Explanation timed out"),
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit and explain it.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+
+    assert "**0.0490**" in out["answer"]
+    assert "very weak positive linear association" in (
+        out["answer"]
+    )
+
+    assert (
+        "Correlation does not establish causation."
+        in out["answer"]
+    )
+
+    # The explanation model is no longer required.
+    assert len(llm.calls) == 1
+
+def test_scalar_correlation_rejects_wrong_explanation(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = 0.048992244529133366",
+        "The Pearson correlation coefficient is 0.9.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit and explain it.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "**0.0490**" in out["answer"]
+    assert "0.9." not in out["answer"]
+
+    assert (
+        "Correlation does not establish causation."
+        in out["answer"]
+    )
+
+    # Incorrect generated explanations are avoided entirely.
+    assert len(llm.calls) == 1
+
+
+def test_valid_scalar_explanation_retains_disclaimer(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = 0.5",
+        "The Pearson correlation coefficient is 0.5.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit and explain it.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "**0.5000**" in out["answer"]
+
+    assert "strong positive linear association" in (
+        out["answer"]
+    )
+
+    assert out["answer"].count(
+        "Correlation does not establish causation."
+    ) == 1
+
+    assert len(llm.calls) == 1
+
+
+def test_unrelated_small_scalar_retains_explanation(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = 0.5",
+        "The calculated ratio is 0.5.",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the ratio of Sales to Profit.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+
+    assert out["answer"] == (
+        "The calculated ratio is 0.5."
+    )
+
+    assert (
+        "Correlation does not establish causation."
+        not in out["answer"]
+    )
+
+    assert len(llm.calls) == 2
+
+
+def test_scalar_correlation_explain_false_unchanged(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = 0.048992244529133366",
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit.",
+        explain=False,
+    )
+
+    assert out == {
+        "answer": "0.048992244529133366",
+        "table": None,
+        "error": None,
+    }
+
+    assert len(llm.calls) == 1
+
+
+# --------------------------------------------------
+# Statistical explanation integrity integration
+# --------------------------------------------------
+
+def test_mixed_correlation_result_discards_narrative(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {"
+        "'Sales_Profit_Pearson_Correlation': "
+        "0.048992244529133366, "
+        "'Interpretation': "
+        "'Increasing sales causes higher profit.'"
+        "}"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit and explain it.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert out["table"] is None
+
+    assert "**0.0490**" in out["answer"]
+
+    assert "very weak positive linear association" in (
+        out["answer"]
+    )
+
+    assert "causes higher profit" not in out["answer"]
+
+    assert out["answer"].count(
+        "Correlation does not establish causation."
+    ) == 1
+
+    assert len(llm.calls) == 1
+
+
+def test_named_correlation_extended_interpretation(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {"
+        "'Sales_Profit_Pearson_Correlation': -0.45"
+        "}"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit and explain it.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "**-0.4500**" in out["answer"]
+
+    assert "moderate negative linear association" in (
+        out["answer"]
+    )
+
+    assert len(llm.calls) == 1
+
+
+def test_mixed_correlation_simple_question(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {"
+        "'Pearson_Correlation': 0.049, "
+        "'Explanation': 'Unsupported causal conclusion.'"
+        "}"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+
+    assert out["answer"] == (
+        "The Pearson correlation coefficient "
+        "is **0.0490**.\n\n"
+        "Correlation does not establish causation."
+    )
+
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "method, association",
+    [
+        ("Pearson", "linear association"),
+        ("Spearman", "monotonic association"),
+        ("Kendall", "rank association"),
+    ],
+)
+def test_extended_correlation_method_interpretation(
+    fake_llm,
+    csv_file,
+    method,
+    association,
+):
+    llm = fake_llm(
+        "result = safe_correlation("
+        "df['Sales'], df['Profit'], "
+        f"method='{method.lower()}')"
+    )
+
+    out = run_analysis(
+        csv_file,
+        f"Calculate the {method} correlation "
+        "between Sales and Profit and explain it.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert association in out["answer"]
+
+    assert (
+        "Correlation does not establish causation."
+        in out["answer"]
+    )
+
+    assert len(llm.calls) == 1
+
+
+def test_correlation_exclusion_count_preserved(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = {"
+        "'Pearson_Correlation': 0.5, "
+        "'Excluded_Rows': 2"
+        "}"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+    assert "**0.5000**" in out["answer"]
+    assert "Excluded Rows is **2**." in out["answer"]
+
+    assert (
+        "Correlation does not establish causation."
+        in out["answer"]
+    )
+
+    assert len(llm.calls) == 1
+
+
+def test_statistical_prompt_separates_interpretation(
+    fake_llm,
+    csv_file,
+):
+    llm = fake_llm(
+        "result = 0.5"
+    )
+
+    out = run_analysis(
+        csv_file,
+        "Calculate the Pearson correlation "
+        "between Sales and Profit and explain it.",
+        explain=True,
+    )
+
+    assert out["error"] is None
+
+    system_prompt = llm.calls[0][0]["content"]
+
+    assert (
+        "Do not generate business interpretations "
+        "inside Python code."
+        in system_prompt
+    )
+
+    assert (
+        "Describe correlation as association, "
+        "not causal impact."
+        in system_prompt
+    )
+
+    assert len(llm.calls) == 1

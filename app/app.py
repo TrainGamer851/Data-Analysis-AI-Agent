@@ -207,30 +207,46 @@ business_css = """
     color: var(--body-text-color-subdued);
 }
 
-/* Force both dashboard panels to the same height */
+/* Synchronize dashboard panels on horizontal layouts */
+#dashboard-row {
+    align-items: stretch !important;
+    flex-wrap: wrap !important;
+}
+
+/* Allow both dashboard panels to grow naturally */
 #dataset-panel,
 #chat-panel {
-    height: 820px !important;
-    min-height: 820px !important;
-    max-height: 820px !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     box-sizing: border-box !important;
     align-self: stretch !important;
+    justify-content: flex-start !important;
+    min-width: 0;
 }
 
-/* Scroll dataset contents instead of expanding the panel */
+/* Keep dataset contents in their original positions */
 #dataset-panel {
-    overflow-y: auto !important;
+    overflow: visible !important;
 }
 
-/* Keep chat content inside its panel */
+/* Keep chatbot contents inside the panel */
 #chat-panel {
     overflow: hidden !important;
 }
 
-/* Limit preview table height */
-#dataset-panel .dataframe {
-    max-height: 220px !important;
-    overflow: auto !important;
+/* Allow chatbot height to follow conversation content */
+#chatbot {
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    min-height: 420px !important;
+    max-height: 1260px !important;
+}
+
+/* Keep the dataset preview independently scrollable */
+#dataset-preview {
+    min-width: 0 !important;
+    max-width: 100% !important;
 }
 
 /* =========================================
@@ -451,7 +467,7 @@ def analyze_question_with_chart(
                     business_table_to_markdown(result_df)
                 )
 
-                answer += "\n\n### Supporting Data\n\n"
+                answer += "\n\n"
                 answer += formatted_table
 
                 debug_log(
@@ -867,7 +883,10 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
             "and keep your analysis in one conversation."
         )
 
-    with gr.Row(equal_height=True):
+    with gr.Row(
+        equal_height=True,
+        elem_id="dashboard-row",
+    ):
         with gr.Column(scale=4, min_width=300, elem_id="dataset-panel"):
             gr.Markdown("### Dataset Management")
             gr.Markdown(
@@ -887,10 +906,12 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
             with gr.Row():
                 row_count = gr.Textbox(label="Total records", interactive=False)
                 column_count = gr.Textbox(label="Data fields", interactive=False)
-            with gr.Accordion("Data preview", open=False):
+            with gr.Accordion("Data preview", open=True):
                 dataset_table = gr.Dataframe(
                     label="First 100 records",
                     interactive=False,
+                    max_height=440,
+                    elem_id="dataset-preview",
                 )
 
         with gr.Column(scale=7, min_width=420, elem_id="chat-panel"):
@@ -910,7 +931,9 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
             chatbot = gr.Chatbot(
                 label="Analysis conversation",
                 show_label=False,
-                height=420,
+                height=None,
+                min_height=420,
+                max_height=1260,
                 value=[],
                 elem_id="chatbot",
             )

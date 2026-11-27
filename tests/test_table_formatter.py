@@ -1,8 +1,10 @@
 import pandas as pd
+import pytest
 
 from app.table_formatter import (
     format_business_table,
     business_table_to_markdown,
+    get_column_type,
 )
 
 
@@ -325,3 +327,352 @@ def test_discount_formatting_preserves_original_data():
     format_business_table(df)
 
     pd.testing.assert_frame_equal(df, original)
+
+
+
+def test_average_sales_threshold_currency_format():
+    df = pd.DataFrame({
+        "Average_Sales_Threshold": [136854.961],
+    })
+
+    result = format_business_table(df)
+
+    assert (
+        result["Average_Sales_Threshold"].iloc[0]
+        == "$136,854.96"
+    )
+
+
+def test_short_sales_threshold_alias_currency_format():
+    df = pd.DataFrame({
+        "Avg_Sales_Threshold": [136854.961],
+    })
+
+    result = format_business_table(df)
+
+    assert (
+        result["Avg_Sales_Threshold"].iloc[0]
+        == "$136,854.96"
+    )
+
+
+
+
+def test_additional_business_currency_columns():
+    df = pd.DataFrame({
+        "Average_Salary": [100000],
+        "Total_Inventory_Value": [13430],
+        "Net_Income": [2500],
+        "Cost_Per_Conversion": [6.25],
+        "Advertising_Spend": [500],
+    })
+
+    result = format_business_table(df)
+
+    assert result["Average_Salary"].iloc[0] == "$100,000.00"
+    assert result["Total_Inventory_Value"].iloc[0] == "$13,430.00"
+    assert result["Net_Income"].iloc[0] == "$2,500.00"
+    assert result["Cost_Per_Conversion"].iloc[0] == "$6.25"
+    assert result["Advertising_Spend"].iloc[0] == "$500.00"
+
+
+def test_additional_business_percentage_columns():
+    df = pd.DataFrame({
+        "ROI_Pct": [500],
+        "Conversion_Rate_Pct": [8],
+        "Discount_Rate_Pct": [25],
+    })
+
+    result = format_business_table(df)
+
+    assert result["ROI_Pct"].iloc[0] == "500.00%"
+    assert result["Conversion_Rate_Pct"].iloc[0] == "8.00%"
+    assert result["Discount_Rate_Pct"].iloc[0] == "25.00%"
+
+
+def test_inventory_quantity_formatting():
+    df = pd.DataFrame({
+        "Stock_On_Hand": [10.0],
+        "Reorder_Level": [25.0],
+        "Shortage": [15.0],
+    })
+
+    result = format_business_table(df)
+
+    assert result["Stock_On_Hand"].iloc[0] == "10"
+    assert result["Reorder_Level"].iloc[0] == "25"
+    assert result["Shortage"].iloc[0] == "15"
+
+
+
+
+def test_expanded_business_money_formatting():
+    df = pd.DataFrame({
+        "Total_Net_Profit": [2000],
+        "Generated_Revenue": [4500],
+        "Customer_Acquisition_Cost": [25.5],
+        "Cost_Of_Goods_Sold": [1500],
+    })
+
+    result = format_business_table(df)
+
+    assert result["Total_Net_Profit"].iloc[0] == "$2,000.00"
+    assert result["Generated_Revenue"].iloc[0] == "$4,500.00"
+    assert result["Customer_Acquisition_Cost"].iloc[0] == "$25.50"
+    assert result["Cost_Of_Goods_Sold"].iloc[0] == "$1,500.00"
+
+
+def test_roi_and_roas_use_different_units():
+    df = pd.DataFrame({
+        "ROI_Pct": [500],
+        "ROAS": [6.0],
+        "Inventory_Turnover": [4.5],
+    })
+
+    result = format_business_table(df)
+
+    assert result["ROI_Pct"].iloc[0] == "500.00%"
+    assert result["ROAS"].iloc[0] == "6.00"
+    assert result["Inventory_Turnover"].iloc[0] == "4.50"
+
+
+@pytest.mark.parametrize(
+    "column, value, expected",
+    [
+        (
+            "Total_Revenue_USD",
+            10000.0,
+            "$10,000.00",
+        ),
+        (
+            "Total_Valid_Revenue_USD",
+            10000.5,
+            "$10,000.50",
+        ),
+        (
+            "Revenue_EUR",
+            8000.0,
+            "€8,000.00",
+        ),
+        (
+            "Revenue_GBP",
+            6000.0,
+            "£6,000.00",
+        ),
+        (
+            "Revenue_CAD",
+            3000.0,
+            "CAD 3,000.00",
+        ),
+        (
+            "Revenue_AUD",
+            4000.0,
+            "AUD 4,000.00",
+        ),
+        (
+            "Revenue_JPY",
+            150000,
+            "JPY 150,000.00",
+        ),
+        (
+            "Revenue_INR",
+            25000,
+            "INR 25,000.00",
+        ),
+        (
+            "Revenue_CNY",
+            12000,
+            "CNY 12,000.00",
+        ),
+        (
+            "Net_Profit_USD",
+            -500.0,
+            "-$500.00",
+        ),
+        (
+            "Net_Profit_EUR",
+            -1250.75,
+            "-€1,250.75",
+        ),
+        (
+            "Billed_Value_USD",
+            42000,
+            "$42,000.00",
+        ),
+        (
+            "Direct_Expenditure_USD",
+            31000,
+            "$31,000.00",
+        ),
+        (
+            "Revenue_USD",
+            0,
+            "$0.00",
+        ),
+        (
+            "Revenue_EUR",
+            float("nan"),
+            "—",
+        ),
+        (
+            "Revenue_GBP",
+            float("inf"),
+            "—",
+        ),
+        (
+            "Revenue_USD",
+            None,
+            "—",
+        ),
+        (
+            "Revenue_USD_EUR",
+            1000,
+            "1,000",
+        ),
+        (
+            "Revenue_USD_Pct",
+            12.5,
+            "12.50%",
+        ),
+        (
+            "Excluded_Rows",
+            3,
+            "3",
+        ),
+        (
+            "Total_Quantity",
+            210,
+            "210",
+        ),
+        (
+            "Total_Revenue",
+            10000,
+            "$10,000.00",
+        ),
+    ],
+)
+def test_explicit_currency_table_formatting(
+    column,
+    value,
+    expected,
+):
+    df = pd.DataFrame({
+        column: [value],
+    })
+
+    result = format_business_table(df)
+
+    assert result[column].iloc[0] == expected
+
+
+@pytest.mark.parametrize(
+    "column, expected",
+    [
+        ("Revenue_USD", "money:USD"),
+        ("Revenue_EUR", "money:EUR"),
+        ("Revenue_GBP", "money:GBP"),
+        ("Revenue_CAD", "money:CAD"),
+        ("Revenue", "money"),
+        ("Revenue_USD_EUR", "number"),
+        ("Revenue_USD_Pct", "percentage"),
+        ("Order_ID", "identifier"),
+        ("Quantity", "count"),
+        (
+            "Discount_Profit_Correlation",
+            "correlation",
+        ),
+    ],
+)
+def test_currency_column_type_detection(
+    column,
+    expected,
+):
+    assert get_column_type(column) == expected
+
+
+def test_multiple_currency_columns_remain_separate():
+    df = pd.DataFrame({
+        "Revenue_USD": [15000],
+        "Revenue_EUR": [8000],
+        "Revenue_GBP": [6000],
+    })
+
+    result = format_business_table(df)
+
+    assert result["Revenue_USD"].iloc[0] == (
+        "$15,000.00"
+    )
+
+    assert result["Revenue_EUR"].iloc[0] == (
+        "€8,000.00"
+    )
+
+    assert result["Revenue_GBP"].iloc[0] == (
+        "£6,000.00"
+    )
+
+
+def test_currency_markdown_preserves_units():
+    df = pd.DataFrame({
+        "Revenue_USD": [15000],
+        "Revenue_EUR": [8000],
+        "Revenue_GBP": [6000],
+        "Revenue_CAD": [3000],
+    })
+
+    markdown = business_table_to_markdown(df)
+
+    assert "$15,000.00" in markdown
+    assert "€8,000.00" in markdown
+    assert "£6,000.00" in markdown
+    assert "CAD 3,000.00" in markdown
+
+    assert "Revenue USD" in markdown
+    assert "Revenue EUR" in markdown
+    assert "Revenue GBP" in markdown
+    assert "Revenue CAD" in markdown
+
+
+def test_currency_formatting_does_not_modify_data():
+    df = pd.DataFrame({
+        "Revenue_USD": [10000.5678],
+        "Revenue_EUR": [8000.1234],
+        "Quantity": [210],
+    })
+
+    original = df.copy(deep=True)
+
+    format_business_table(df)
+    business_table_to_markdown(df)
+
+    pd.testing.assert_frame_equal(df, original)
+
+
+def test_currency_and_percentage_columns_together():
+    df = pd.DataFrame({
+        "Department": ["Marketing"],
+        "Revenue_USD": [8000],
+        "Net_Profit_USD": [-500],
+        "Net_Profit_Margin_Pct": [-6.25],
+        "Excluded_Rows": [3],
+    })
+
+    result = format_business_table(df)
+
+    assert result["Department"].iloc[0] == (
+        "Marketing"
+    )
+
+    assert result["Revenue_USD"].iloc[0] == (
+        "$8,000.00"
+    )
+
+    assert result["Net_Profit_USD"].iloc[0] == (
+        "-$500.00"
+    )
+
+    assert result["Net_Profit_Margin_Pct"].iloc[0] == (
+        "-6.25%"
+    )
+
+    assert result["Excluded_Rows"].iloc[0] == "3"

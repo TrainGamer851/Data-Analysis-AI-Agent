@@ -1,7 +1,15 @@
-"""Generate interactive charts from structured analysis results."""
-
 import pandas as pd
 import plotly.graph_objects as go
+
+from agent.currency_units import (
+    CURRENCY_PREFIXES,
+    format_currency,
+)
+
+from agent.debug_logger import (
+    debug_log,
+    DebugTimer,
+)
 
 from app.table_formatter import (
     normalize_column,
@@ -50,19 +58,133 @@ DIMENSION_COLUMNS = {
 }
 
 
+def get_chart_currency(column_type):
+    """Resolve the currency associated with a chart metric."""
+
+    # Preserve existing behavior for legacy monetary columns.
+    if column_type == "money":
+        return "USD"
+
+    if column_type.startswith("money:"):
+        currency = column_type.split(":", 1)[1]
+
+        if currency in CURRENCY_PREFIXES:
+            return currency
+
+    return None
+
+
+def is_chart_dimension(column, series):
+    """Identify a supported categorical chart dimension."""
+
+    normalized = normalize_column(column)
+
+    if normalized in IGNORED_COLUMNS:
+        return False
+
+    if normalized in TIME_COLUMNS:
+        return False
+
+    column_type = get_column_type(column)
+
+    if column_type == "identifier":
+        return False
+
+    if column_type != "number":
+        return False
+
+    if normalized in DIMENSION_COLUMNS:
+        return True
+
+    # Reject identifier-like column names.
+    tokens = normalized.replace("-", " ").split()
+
+    if any(
+        token in {
+            "id",
+            "identifier",
+            "uuid",
+            "sku",
+            "email",
+            "phone",
+            "address",
+            "description",
+            "notes",
+            "comment",
+            "comments",
+        }
+        for token in tokens
+    ):
+        return False
+
+    # Only infer dimensions from non-empty text values.
+    if series.isna().any():
+        return False
+
+    values = series.tolist()
+
+    if not all(
+        isinstance(value, str)
+        and value.strip()
+        and len(value.strip()) <= 80
+        for value in values
+    ):
+        return False
+
+    debug_log(
+        "CHART DIMENSION",
+        f"Inferred categorical dimension: {column}",
+    )
+
+    return True
+
+
 def build_chart(table):
     """Return a Plotly figure or None for unsupported data."""
 
+    chart_timer = DebugTimer("CHART")
+
+    debug_log(
+        "CHART",
+        "Starting chart generation",
+    )
+
     if table is None:
+        debug_log(
+            "CHART",
+            "Chart skipped: no supporting table",
+        )
+
         return None
 
     df = pd.DataFrame(table).copy()
 
+    debug_log(
+        "CHART",
+        f"Input rows: {len(df)} | "
+        f"Columns: {df.shape[1]}",
+    )
+
     if len(df) < 2 or len(df) > MAX_CHART_ROWS:
+        debug_log(
+            "CHART",
+            "Chart skipped: unsupported row count",
+        )
+
         return None
 
     if df.shape[1] < 2:
+        debug_log(
+            "CHART",
+            "Chart skipped: insufficient columns",
+        )
+
         return None
+
+    debug_log(
+        "CHART DIMENSION",
+        "Inspecting table for chart dimensions",
+    )
 
     time_columns = [
         column
@@ -73,29 +195,67 @@ def build_chart(table):
     dimension_columns = [
         column
         for column in df.columns
-        if normalize_column(column) in DIMENSION_COLUMNS
+        if is_chart_dimension(
+            column,
+            df[column],
+        )
     ]
+
+    debug_log(
+        "CHART DIMENSION",
+        f"Time dimensions: {time_columns}",
+    )
+
+    debug_log(
+        "CHART DIMENSION",
+        f"Categorical dimensions: {dimension_columns}",
+    )
+
+    if not time_columns and not dimension_columns:
+        debug_log(
+            "CHART DIMENSION",
+            "Chart skipped: no supported grouping dimension",
+        )
+
+        return None
+
+    # Avoid misleading charts for multidimensional tables.
+    if len(time_columns) + len(dimension_columns) > 1:
+        debug_log(
+            "CHART DIMENSION",
+            "Chart skipped: multiple grouping dimensions",
+        )
+
+        return None
 
     if time_columns:
         x_column = time_columns[0]
         is_time_series = True
 
-    elif dimension_columns:
+    else:
         x_column = dimension_columns[0]
         is_time_series = False
 
-    else:
-        return None
-
-    # Avoid misleading charts for multidimensional tables.
-    if len(time_columns) + len(dimension_columns) > 1:
-        return None
-
     if df[x_column].isna().any():
+        debug_log(
+            "CHART DIMENSION",
+            "Chart skipped: missing dimension values",
+        )
+
         return None
 
     if df[x_column].duplicated().any():
+        debug_log(
+            "CHART DIMENSION",
+            "Chart skipped: duplicate dimension values",
+        )
+
         return None
+
+    debug_log(
+        "CHART DIMENSION",
+        f"Validated chart dimension: {x_column}",
+    )
 
     numeric_columns = []
 
@@ -137,25 +297,69 @@ def build_chart(table):
             numeric_columns[0]
         )
 
+
         metrics = [
             column
             for column in numeric_columns
             if get_column_type(column) == first_type
         ][:3]
 
+    chart_currency = get_chart_currency(
+        first_type
+    )
+
+    debug_log(
+        "CHART",
+        f"Selected dimension: {x_column}",
+    )
+
+    debug_log(
+        "CHART",
+        f"Selected metrics: {metrics}",
+    )
+
+    debug_log(
+        "CHART",
+        f"Metric type: {first_type} | "
+        f"Currency: {chart_currency}",
+    )
+
     if is_time_series:
         df = df.sort_values(x_column)
+
 
     x_values = df[x_column].astype(str).tolist()
 
     figure = go.Figure()
 
+
     for column in metrics:
         label = clean_column_header(column)
         column_type = get_column_type(column)
 
-        if column_type == "money":
-            hover_format = "$%{y:,.2f}"
+        currency = get_chart_currency(
+            column_type
+        )
+
+        hover_options = {}
+
+        if currency is not None:
+            # Format hover labels using the shared currency
+            # utility without modifying plotted values.
+            hover_options["customdata"] = [
+                format_currency(value, currency)
+                if pd.notna(value)
+                else "Unavailable"
+                for value in df[column].tolist()
+            ]
+
+            hover_format = "%{customdata}"
+
+            debug_log(
+                "CHART",
+                f"Currency hover formatting: "
+                f"{column} | {currency}",
+            )
 
         elif column_type == "percentage":
             hover_format = "%{y:,.2f}%"
@@ -174,6 +378,7 @@ def build_chart(table):
             + "<extra></extra>"
         )
 
+
         use_line = (
             is_time_series
             and "year" in normalize_column(x_column)
@@ -189,6 +394,7 @@ def build_chart(table):
                     name=label,
                     connectgaps=False,
                     hovertemplate=hover_template,
+                    **hover_options,
                 )
             )
 
@@ -209,6 +415,7 @@ def build_chart(table):
                     y=df[column].tolist(),
                     name=label,
                     hovertemplate=hover_template,
+                    **hover_options,
                     **bar_options,
                 )
             )
@@ -253,8 +460,8 @@ def build_chart(table):
         ),
         xaxis_title=dimension_title,
         yaxis_title=(
-            "Amount (USD)"
-            if first_type == "money"
+            f"Amount ({chart_currency})"
+            if chart_currency is not None
             else "Percentage"
             if first_type == "percentage"
             else "Value"
@@ -283,10 +490,19 @@ def build_chart(table):
         marker=dict(size=8),
     )
 
-    if first_type == "money":
+
+    if chart_currency is not None:
         figure.update_yaxes(
-            tickprefix="$",
+            tickprefix=CURRENCY_PREFIXES[
+                chart_currency
+            ],
             tickformat=",.2f",
+        )
+
+        debug_log(
+            "CHART",
+            f"Currency axis configured: "
+            f"{chart_currency}",
         )
 
     elif first_type == "percentage":
@@ -299,5 +515,15 @@ def build_chart(table):
         figure.update_yaxes(
             tickformat=",d",
         )
+
+    debug_log(
+        "CHART",
+        f"Chart traces generated: "
+        f"{len(figure.data)}",
+    )
+
+    chart_timer.finish(
+        "Chart generation completed"
+    )
 
     return figure

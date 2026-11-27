@@ -193,3 +193,220 @@ def test_null_result_serialization(df):
     assert out["success"]
     assert out["result_type"] == "scalar"
     assert out["result"] is None
+
+
+
+# --------------------------------------------------
+# Trusted statistical calculations
+# --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["pearson", "spearman", "kendall"],
+)
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        ([2, 4, 6, 8], 1.0),
+        ([8, 6, 4, 2], -1.0),
+    ],
+)
+def test_safe_correlation(
+    method,
+    values,
+    expected,
+):
+    data = pd.DataFrame({
+        "A": [1, 2, 3, 4],
+        "B": values,
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        f"method='{method}')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result_type"] == "scalar"
+    assert out["result"] == pytest.approx(
+        expected
+    )
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["pearson", "spearman", "kendall"],
+)
+def test_safe_correlation_missing_values(method):
+    data = pd.DataFrame({
+        "A": [1, 2, None, 4, 5],
+        "B": [2, 4, 100, None, 10],
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        f"method='{method}')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["pearson", "spearman", "kendall"],
+)
+def test_safe_correlation_constant_column(method):
+    data = pd.DataFrame({
+        "A": [1, 1, 1, 1],
+        "B": [1, 2, 3, 4],
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        f"method='{method}')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] is None
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["pearson", "spearman", "kendall"],
+)
+def test_safe_correlation_insufficient_data(method):
+    data = pd.DataFrame({
+        "A": [1, None],
+        "B": [2, 3],
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        f"method='{method}')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] is None
+
+
+def test_safe_spearman_nonlinear_relationship():
+    data = pd.DataFrame({
+        "A": [1, 2, 3, 4],
+        "B": [1, 4, 9, 16],
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        "method='spearman')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(1.0)
+
+
+def test_safe_spearman_ties():
+    data = pd.DataFrame({
+        "A": [1, 2, 2, 3],
+        "B": [1, 3, 2, 4],
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        "method='spearman')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(
+        0.9486832980505138
+    )
+
+
+def test_safe_kendall_ties():
+    data = pd.DataFrame({
+        "A": [1, 2, 2, 3],
+        "B": [1, 3, 2, 4],
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        "method='kendall')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(
+        0.9128709291752769
+    )
+
+
+def test_safe_kendall_discordant_pairs():
+    data = pd.DataFrame({
+        "A": [1, 2, 3, 4],
+        "B": [1, 3, 2, 4],
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        "method='kendall')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(
+        2 / 3
+    )
+
+
+def test_safe_correlation_invalid_method(df):
+    out = execute_code(
+        "result = safe_correlation("
+        "df['Sales'], df['Sales'], "
+        "method='invalid')",
+        df,
+    )
+
+    assert not out["success"]
+    assert "Supported correlation methods" in out["error"]
+
+
+def test_safe_correlation_invalid_input(df):
+    out = execute_code(
+        "result = safe_correlation(1, 2)",
+        df,
+    )
+
+    assert not out["success"]
+    assert "pandas Series" in out["error"]
+
+
+def test_safe_kendall_large_dataset():
+    data = pd.DataFrame({
+        "A": range(50000),
+        "B": range(49999, -1, -1),
+    })
+
+    out = execute_code(
+        "result = safe_correlation("
+        "df['A'], df['B'], "
+        "method='kendall')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(-1.0)
