@@ -221,7 +221,7 @@ def run_controlled_analysis(
 
             request_path.write_text(
                 json.dumps({
-                    "csv_path": str(Path(csv_path).resolve()),
+                    "csv_path": str(Path(csv_path).resolve()) if csv_path else None,
                     "question": question,
                     "explain": explain,
                     "context": build_conversation_context(

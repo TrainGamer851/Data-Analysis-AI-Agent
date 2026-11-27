@@ -14,6 +14,7 @@ from agent.conversation_context import (
 )
 from agent.contextual_metrics import try_contextual_analysis
 from agent.financial_metrics import try_financial_analysis
+from agent.analysis_planner import try_planned_analysis
 from agent.debug_logger import debug_log, DebugTimer
 from agent.result_formatter import (
     escape_text,
@@ -510,6 +511,20 @@ def run_analysis(
     )
     
 
+    # Explicit public research does not require or read a dataset.
+    if explain:
+        from agent.research import is_research_request, try_research
+        if is_research_request(question):
+            if not _SLOTS.acquire(blocking=False):
+                return error_response("The analysis service is busy. Please try again in a moment.")
+            try:
+                debug_log("ROUTER", "Selected standalone public research")
+                return try_research(question)
+            finally:
+                _SLOTS.release()
+                debug_log("CLEANUP", "Agent execution slot released")
+                timer.finish("Research execution finished")
+
     # Step 2: Check and Load the CSV dataset.
     debug_log(
         "VALIDATION",
@@ -581,6 +596,11 @@ def run_analysis(
 
     try:
         if explain:
+            from agent.recommendations import try_recommendation
+            recommendation_result = try_recommendation(df, question)
+            if recommendation_result is not None:
+                return recommendation_result
+
             debug_log(
                 "ROUTER",
                 "Checking business metrics",
@@ -697,6 +717,10 @@ def run_analysis(
                 "ROUTER",
                 "No matching deterministic financial metrics intent",
             )
+
+            planned_result = try_planned_analysis(df, question)
+            if planned_result is not None:
+                return planned_result
 
         else:
             debug_log(

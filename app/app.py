@@ -243,6 +243,16 @@ business_css = """
     max-height: 1260px !important;
 }
 
+/* Stack panels on narrow screens without changing desktop layout. */
+@media (max-width: 760px) {
+    #dataset-panel, #chat-panel {
+        flex: 1 1 100% !important;
+        min-width: 0 !important;
+        width: 100% !important;
+    }
+    #question-row { flex-wrap: wrap !important; }
+}
+
 /* Keep the dataset preview independently scrollable */
 #dataset-preview {
     min-width: 0 !important;
@@ -389,7 +399,8 @@ def analyze_question_with_chart(
     job=None,
     context=None,
 ):
-    if not csv_path:
+    from agent.research import is_research_request
+    if not csv_path and not is_research_request(question):
         return "Please upload a CSV file first.", None
 
     if not question or not question.strip():
@@ -954,7 +965,7 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
                     label="Ask a business question",
                     show_label=False,
                     placeholder=(
-                        "e.g. Which category has the highest total profit?"
+                        "e.g. Calculate net profit margin, or research inflation for US."
                     ),
                     lines=2,
                     max_lines=2,
