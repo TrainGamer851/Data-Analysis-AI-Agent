@@ -4,13 +4,16 @@ import pytest
 from agent.execution_env import execute_code
 from agent.execution_env import docker_available, execute_code
 
+
 # Run test on the local, and on Docker if available
 @pytest.fixture(autouse=True, params=["local", "docker"])
 def backend(request, monkeypatch):
+    # Call `pytest.skip` when `request.param == 'docker' and (not docker_available())`.
     if request.param == "docker" and not docker_available():
         pytest.skip("Docker is not available")
     monkeypatch.setenv("SANDBOX_BACKEND", request.param)
-    
+
+
 # Mock data
 @pytest.fixture
 def df():
@@ -18,9 +21,12 @@ def df():
         {
             "Region": ["West", "East", "West", "South"],
             "Sales": [100.0, 200.0, 50.5, None],
-            "Order Date": pd.to_datetime(["2024-01-01", "2024-02-01", None, "2024-03-01"]),
+            "Order Date": pd.to_datetime(
+                ["2024-01-01", "2024-02-01", None, "2024-03-01"]
+            ),
         }
     )
+
 
 # functionality
 def test_scalar_result(df):
@@ -28,15 +34,21 @@ def test_scalar_result(df):
     assert out["success"] and out["result"] == 350.5
     assert out["result_type"] == "scalar"
 
+
+# Verify that fenced code.
 def test_fenced_code(df):
     out = execute_code("```python\nresult = len(df)\n```", df)
     assert out["success"] and out["result"] == 4
 
+
+# Verify that groupby keeps index as column.
 def test_groupby_keeps_index_as_column(df):
     out = execute_code("result = df.groupby('Region')['Sales'].sum()", df)
     assert out["success"] and out["result_type"] == "table"
     assert {"Region": "West", "Sales": 150.5} in out["result"]
 
+
+# Verify that timestamps and nan serialize.
 def test_timestamps_and_nan_serialize(df):
     out = execute_code("result = df", df)
     assert out["success"]
@@ -44,14 +56,20 @@ def test_timestamps_and_nan_serialize(df):
     assert out["result"][2]["Order Date"] is None
     assert out["result"][3]["Sales"] is None
 
+
+# Verify that table truncation.
 def test_table_truncation(df):
     out = execute_code("result = pd.DataFrame({'x': range(1000)})", df, max_rows=50)
     assert out["success"] and len(out["result"]) == 50
 
+
+# Verify that comprehension sees top level names.
 def test_comprehension_sees_top_level_names(df):
     code = "cols = ['Sales']\nresult = [c for c in df.columns if c in cols]"
     assert execute_code(code, df)["result"] == ["Sales"]
 
+
+# Verify that allowed import and exception classes.
 def test_allowed_import_and_exception_classes(df):
     code = (
         "import pandas as pd\nimport math\n"
@@ -60,36 +78,49 @@ def test_allowed_import_and_exception_classes(df):
     out = execute_code(code, df)
     assert out["success"] and out["result"] == 2
 
+
+# Verify that unique values serialize.
 def test_unique_values_serialize(df):
     out = execute_code("result = df['Region'].unique()", df)
     assert out["success"] and out["result"] == ["West", "East", "South"]
 
+
+# Verify that stdout captured and capped.
 def test_stdout_captured_and_capped(df):
     out = execute_code("print('hi')\nresult = 1", df)
     assert out["stdout"] == "hi\n"
     big = execute_code("print('x' * 1_000_000)\nresult = 1", df)
     assert big["success"] and len(big["stdout"]) < 20_000
 
+
 # error feedback tests
 def test_syntax_error(df):
     out = execute_code("result = (", df)
     assert not out["success"] and "SyntaxError" in out["error"]
 
+
+# Verify that runtime error has line and columns.
 def test_runtime_error_has_line_and_columns(df):
     out = execute_code("x = 1\nresult = df['Profit'].sum()", df)
     assert not out["success"]
     assert "KeyError" in out["error"] and "line 2" in out["error"]
     assert "Available columns" in out["error"] and "Sales" in out["error"]
 
+
+# Verify that missing result.
 def test_missing_result(df):
     out = execute_code("x = 5", df)
     assert not out["success"] and "result" in out["error"]
 
+
+# Verify that empty inputs.
 def test_empty_inputs(df):
     assert not execute_code("", df)["success"]
     assert not execute_code("result = 1", None)["success"]
     assert not execute_code("result = 1", pd.DataFrame())["success"]
 
+
+# Verify that timeout.
 def test_timeout(df):
     out = execute_code("while True:\n    pass", df, timeout=2)
     assert not out["success"] and "timed out" in out["error"]
@@ -100,39 +131,335 @@ def test_disallowed_import(df):
     out = execute_code("import os\nresult = 1", df)
     assert not out["success"] and "not allowed" in out["error"]
 
+
+# Verify that cannot read arbitrary files.
 def test_cannot_read_arbitrary_files(df):
     out = execute_code("result = pd.read_csv('/etc/passwd').shape", df)
     assert not out["success"] and "Blocked" in out["error"]
 
+
+# Verify that cannot write files.
 def test_cannot_write_files(df, tmp_path):
     target = tmp_path / "leak.csv"
     out = execute_code(f"df.to_csv(r'{target}')\nresult = 1", df)
     assert not out["success"] and not target.exists()
 
+
+# Verify that cannot delete files.
 def test_cannot_delete_files(df, tmp_path):
     target = tmp_path / "keep.txt"
     target.write_text("x")
     out = execute_code(f"pd.io.common.os.remove(r'{target}')\nresult = 1", df)
     assert not out["success"] and target.exists()
 
+
+# Verify that secrets not inherited.
 def test_secrets_not_inherited(df, monkeypatch):
     monkeypatch.setenv("NRP_API_KEY", "super-secret")
     out = execute_code("result = pd.io.common.os.environ.get('NRP_API_KEY')", df)
     assert out["success"] and out["result"] is None
 
+
+# Verify that cannot read proc environ.
 def test_cannot_read_proc_environ(df):
     out = execute_code("result = pd.read_csv('/proc/self/environ').shape", df)
     assert not out["success"] and "Blocked" in out["error"]
 
+
+# Verify that network blocked.
 def test_network_blocked(df):
     out = execute_code("result = pd.read_csv('http://127.0.0.1:9/x.csv').shape", df)
     assert not out["success"] and "Blocked" in out["error"]
 
+
+# Verify that subprocess blocked.
 def test_subprocess_blocked(df):
     out = execute_code("result = pd.io.common.os.system('echo pwned')", df)
     assert not out["success"] and "Blocked" in out["error"]
 
+
+# Verify that parent df not mutated.
 def test_parent_df_not_mutated(df):
     before = df.copy()
     execute_code("df.drop(df.index, inplace=True)\nresult = 1", df)
     pd.testing.assert_frame_equal(df, before)
+
+
+# ---------------------------------------------------------------------------
+# Structured result serialization
+# ---------------------------------------------------------------------------
+
+
+# Verify that list result type.
+def test_list_result_type(df):
+    out = execute_code(
+        "result = df['Region'].unique().tolist()",
+        df,
+    )
+
+    assert out["success"]
+    assert out["result_type"] == "object"
+    assert out["result"] == [
+        "West",
+        "East",
+        "South",
+    ]
+
+
+# Verify that dictionary result type.
+def test_dictionary_result_type(df):
+    out = execute_code(
+        "result = {'Total Sales': df['Sales'].sum(), " "'Rows': len(df)}",
+        df,
+    )
+
+    assert out["success"]
+    assert out["result_type"] == "object"
+    assert out["result"] == {
+        "Total Sales": 350.5,
+        "Rows": 4,
+    }
+
+
+# Verify that empty list serialization.
+def test_empty_list_serialization(df):
+    out = execute_code("result = []", df)
+
+    assert out["success"]
+    assert out["result_type"] == "object"
+    assert out["result"] == []
+
+
+# Verify that empty dictionary serialization.
+def test_empty_dictionary_serialization(df):
+    out = execute_code("result = {}", df)
+
+    assert out["success"]
+    assert out["result_type"] == "object"
+    assert out["result"] == {}
+
+
+# Verify that null result serialization.
+def test_null_result_serialization(df):
+    out = execute_code("result = None", df)
+
+    assert out["success"]
+    assert out["result_type"] == "scalar"
+    assert out["result"] is None
+
+
+# --------------------------------------------------
+# Trusted statistical calculations
+# --------------------------------------------------
+
+
+# Verify that safe correlation.
+@pytest.mark.parametrize(
+    "method",
+    ["pearson", "spearman", "kendall"],
+)
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        ([2, 4, 6, 8], 1.0),
+        ([8, 6, 4, 2], -1.0),
+    ],
+)
+def test_safe_correlation(
+    method,
+    values,
+    expected,
+):
+    data = pd.DataFrame(
+        {
+            "A": [1, 2, 3, 4],
+            "B": values,
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " f"method='{method}')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result_type"] == "scalar"
+    assert out["result"] == pytest.approx(expected)
+
+
+# Verify that safe correlation missing values.
+@pytest.mark.parametrize(
+    "method",
+    ["pearson", "spearman", "kendall"],
+)
+def test_safe_correlation_missing_values(method):
+    data = pd.DataFrame(
+        {
+            "A": [1, 2, None, 4, 5],
+            "B": [2, 4, 100, None, 10],
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " f"method='{method}')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(1.0)
+
+
+# Verify that safe correlation constant column.
+@pytest.mark.parametrize(
+    "method",
+    ["pearson", "spearman", "kendall"],
+)
+def test_safe_correlation_constant_column(method):
+    data = pd.DataFrame(
+        {
+            "A": [1, 1, 1, 1],
+            "B": [1, 2, 3, 4],
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " f"method='{method}')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] is None
+
+
+# Verify that safe correlation insufficient data.
+@pytest.mark.parametrize(
+    "method",
+    ["pearson", "spearman", "kendall"],
+)
+def test_safe_correlation_insufficient_data(method):
+    data = pd.DataFrame(
+        {
+            "A": [1, None],
+            "B": [2, 3],
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " f"method='{method}')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] is None
+
+
+# Verify that safe spearman nonlinear relationship.
+def test_safe_spearman_nonlinear_relationship():
+    data = pd.DataFrame(
+        {
+            "A": [1, 2, 3, 4],
+            "B": [1, 4, 9, 16],
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " "method='spearman')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(1.0)
+
+
+# Verify that safe spearman ties.
+def test_safe_spearman_ties():
+    data = pd.DataFrame(
+        {
+            "A": [1, 2, 2, 3],
+            "B": [1, 3, 2, 4],
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " "method='spearman')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(0.9486832980505138)
+
+
+# Verify that safe kendall ties.
+def test_safe_kendall_ties():
+    data = pd.DataFrame(
+        {
+            "A": [1, 2, 2, 3],
+            "B": [1, 3, 2, 4],
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " "method='kendall')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(0.9128709291752769)
+
+
+# Verify that safe kendall discordant pairs.
+def test_safe_kendall_discordant_pairs():
+    data = pd.DataFrame(
+        {
+            "A": [1, 2, 3, 4],
+            "B": [1, 3, 2, 4],
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " "method='kendall')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(2 / 3)
+
+
+# Verify that safe correlation invalid method.
+def test_safe_correlation_invalid_method(df):
+    out = execute_code(
+        "result = safe_correlation(" "df['Sales'], df['Sales'], " "method='invalid')",
+        df,
+    )
+
+    assert not out["success"]
+    assert "Supported correlation methods" in out["error"]
+
+
+# Verify that safe correlation invalid input.
+def test_safe_correlation_invalid_input(df):
+    out = execute_code(
+        "result = safe_correlation(1, 2)",
+        df,
+    )
+
+    assert not out["success"]
+    assert "pandas Series" in out["error"]
+
+
+# Verify that safe kendall large dataset.
+def test_safe_kendall_large_dataset():
+    data = pd.DataFrame(
+        {
+            "A": range(50000),
+            "B": range(49999, -1, -1),
+        }
+    )
+
+    out = execute_code(
+        "result = safe_correlation(" "df['A'], df['B'], " "method='kendall')",
+        data,
+    )
+
+    assert out["success"], out["error"]
+    assert out["result"] == pytest.approx(-1.0)

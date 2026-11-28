@@ -1,0 +1,7 @@
+SKU,Product,Stock_On_Hand,Reorder_Level,Unit_Cost
+P001,Laptop,5,10,800
+P002,Monitor,30,20,200
+P003,Keyboard,12,15,40
+P004,Mouse,50,20,20
+P005,Printer,3,8,150
+P006,Headphones,25,15,60

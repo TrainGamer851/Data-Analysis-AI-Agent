@@ -1,0 +1,7 @@
+Transaction_Date,Transaction_Type,Amount
+2026-01-05,Income,5000
+2026-01-15,Expense,3000
+2026-02-05,Income,6000
+2026-02-15,Expense,3500
+2026-03-05,Income,7000
+2026-03-15,Expense,4000

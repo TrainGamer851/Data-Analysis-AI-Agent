@@ -1,0 +1,7 @@
+Product_Type,Revenue,Net_Profit,Discount_Rate
+Clothing,5000,750,0.15
+Clothing,3000,450,0.25
+Electronics,8000,1200,0.1
+Electronics,4000,800,0.05
+Home,2000,-100,0.3
+Home,1000,50,0.2

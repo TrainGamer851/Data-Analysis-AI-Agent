@@ -119,3 +119,49 @@ Data-Analysis-AI-Agent/
 
 
 **Current status:** Stage 2 in progress; agent runner is unmerged. Stage 3 is half done. The sandbox is built to run generated pandas code safely but is missing the agent. 
+
+## Current application — final integration update
+
+The development-stage notes above are historical. The current application supports
+CSV preview, conversation, charts, deterministic business calculations, generated
+Python analysis, and fixed-source public economic research.
+
+### Run locally (Windows Git Bash)
+
+```bash
+python -m pip install -r requirements.txt
+python -m app.app
+```
+
+Use your existing virtual environment and keep `.env` private. For hosted NRP,
+configure `LLM_PROVIDER=nrp`, `NRP_API_KEY` and optionally `NRP_MODEL=qwen3`.
+For local Ollama, use `LLM_PROVIDER=ollama` and `OLLAMA_MODEL=qwen3:4b`.
+Set `SANDBOX_BACKEND=docker` and start Docker Desktop for generated-code isolation.
+The local subprocess backend is for development only, not a security boundary.
+Do not expose the Gradio server publicly without authentication, transport security,
+resource controls and an independent security review.
+
+### Example requests
+
+- `Calculate ROAS.` (requires compatible revenue and advertising spend columns)
+- `Calculate Pearson correlation of columns Discount_Pct and Net_Profit_USD.`
+- `Research inflation for US.` (no CSV required)
+- `Recommend actions based on net profit margin with inflation for US.` (CSV required)
+
+Research uses World Bank annual observations for inflation, GDP growth and
+unemployment in US, GB, CA, DE, FR, IN, JP, AU, MX and BR. It sends only the
+selected country and indicator, not uploaded records. Observations may lag the
+current year. Combined requests present separate dataset and national evidence;
+no causal or industry benchmark claim follows from the comparison. Marketing ROI
+based only on revenue and ad spend is an advertising-return proxy, not profit ROI.
+General AI requests may send dataset schema and sample values to the configured
+model provider; use only data approved for that provider. Terminal debug logs
+may include questions and analysis details; protect them accordingly.
+
+### Final acceptance
+
+Run `python -m pytest -q` from the project root with Docker available. Verify
+research without CSV, combined recommendations, charts, narrow-screen layout,
+three-dot animation, long-chat scrolling, Stop during a slow analysis, and a
+successful subsequent question. Check that no job containers remain after Stop.
+Do not commit credentials, private datasets, logs, caches or update ZIP archives.
