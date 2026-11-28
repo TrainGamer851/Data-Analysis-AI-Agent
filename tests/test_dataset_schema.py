@@ -10,6 +10,7 @@ from agent.dataset_schema import (
 )
 
 
+# Verify that normalize column name.
 @pytest.mark.parametrize(
     "original, expected",
     [
@@ -25,13 +26,16 @@ def test_normalize_column_name(original, expected):
     assert normalize_column_name(original) == expected
 
 
+# Verify that retail schema.
 def test_retail_schema():
-    df = pd.DataFrame({
-        "Product_Type": ["Home", "Clothing"],
-        "Revenue": [1000, 2000],
-        "Net_Profit": [-50, 300],
-        "Discount_Rate": [0.20, 0.10],
-    })
+    df = pd.DataFrame(
+        {
+            "Product_Type": ["Home", "Clothing"],
+            "Revenue": [1000, 2000],
+            "Net_Profit": [-50, 300],
+            "Discount_Rate": [0.20, 0.10],
+        }
+    )
 
     result = profile_dataset(df)
     mappings = result["unique_candidates"]
@@ -42,88 +46,93 @@ def test_retail_schema():
     assert mappings["discount"] == "Discount_Rate"
 
 
+# Verify that marketing schema.
 def test_marketing_schema():
-    df = pd.DataFrame({
-        "Campaign": ["Email", "Search"],
-        "Advertising_Spend": [500, 1000],
-        "Generated_Revenue": [3000, 4000],
-        "Conversions": [80, 100],
-        "Impressions": [10000, 20000],
-    })
+    df = pd.DataFrame(
+        {
+            "Campaign": ["Email", "Search"],
+            "Advertising_Spend": [500, 1000],
+            "Generated_Revenue": [3000, 4000],
+            "Conversions": [80, 100],
+            "Impressions": [10000, 20000],
+        }
+    )
 
     result = profile_dataset(df)
     mappings = result["unique_candidates"]
 
     assert mappings["campaign"] == "Campaign"
-    assert mappings["advertising_spend"] == (
-        "Advertising_Spend"
-    )
+    assert mappings["advertising_spend"] == ("Advertising_Spend")
     assert mappings["revenue"] == "Generated_Revenue"
     assert mappings["conversions"] == "Conversions"
     assert mappings["impressions"] == "Impressions"
 
 
+# Verify that inventory schema.
 def test_inventory_schema():
-    df = pd.DataFrame({
-        "Stock_On_Hand": [5, 30],
-        "Reorder_Level": [10, 20],
-        "Unit_Cost": [800, 200],
-    })
+    df = pd.DataFrame(
+        {
+            "Stock_On_Hand": [5, 30],
+            "Reorder_Level": [10, 20],
+            "Unit_Cost": [800, 200],
+        }
+    )
 
     result = profile_dataset(df)
     mappings = result["unique_candidates"]
 
-    assert mappings["inventory_quantity"] == (
-        "Stock_On_Hand"
-    )
+    assert mappings["inventory_quantity"] == ("Stock_On_Hand")
     assert mappings["reorder_level"] == "Reorder_Level"
     assert mappings["unit_cost"] == "Unit_Cost"
 
 
+# Verify that human resources schema.
 def test_human_resources_schema():
-    df = pd.DataFrame({
-        "Department": ["Engineering", "Finance"],
-        "Salary": [100000, 90000],
-        "Years_Experience": [6, 5],
-    })
+    df = pd.DataFrame(
+        {
+            "Department": ["Engineering", "Finance"],
+            "Salary": [100000, 90000],
+            "Years_Experience": [6, 5],
+        }
+    )
 
     result = profile_dataset(df)
     mappings = result["unique_candidates"]
 
     assert mappings["department"] == "Department"
     assert mappings["salary"] == "Salary"
-    assert mappings["years_experience"] == (
-        "Years_Experience"
-    )
+    assert mappings["years_experience"] == ("Years_Experience")
 
 
+# Verify that transaction schema.
 def test_transaction_schema():
-    df = pd.DataFrame({
-        "Transaction_Date": [
-            "2026-01-01",
-            "2026-01-02",
-        ],
-        "Transaction_Type": ["Income", "Expense"],
-        "Amount": [5000, 3000],
-    })
+    df = pd.DataFrame(
+        {
+            "Transaction_Date": [
+                "2026-01-01",
+                "2026-01-02",
+            ],
+            "Transaction_Type": ["Income", "Expense"],
+            "Amount": [5000, 3000],
+        }
+    )
 
     result = profile_dataset(df)
     mappings = result["unique_candidates"]
 
-    assert mappings["transaction_date"] == (
-        "Transaction_Date"
-    )
-    assert mappings["transaction_type"] == (
-        "Transaction_Type"
-    )
+    assert mappings["transaction_date"] == ("Transaction_Date")
+    assert mappings["transaction_type"] == ("Transaction_Type")
     assert mappings["amount"] == "Amount"
 
 
+# Verify that ambiguous revenue columns.
 def test_ambiguous_revenue_columns():
-    df = pd.DataFrame({
-        "Sales": [1000],
-        "Revenue": [1200],
-    })
+    df = pd.DataFrame(
+        {
+            "Sales": [1000],
+            "Revenue": [1200],
+        }
+    )
 
     result = profile_dataset(df)
 
@@ -135,13 +144,16 @@ def test_ambiguous_revenue_columns():
     assert "revenue" not in result["unique_candidates"]
 
 
+# Verify that profit concepts remain separate.
 def test_profit_concepts_remain_separate():
-    df = pd.DataFrame({
-        "Profit": [100],
-        "Gross_Profit": [500],
-        "Net_Profit": [200],
-        "Net_Income": [150],
-    })
+    df = pd.DataFrame(
+        {
+            "Profit": [100],
+            "Gross_Profit": [500],
+            "Net_Profit": [200],
+            "Net_Income": [150],
+        }
+    )
 
     result = profile_dataset(df)
     mappings = result["unique_candidates"]
@@ -152,11 +164,14 @@ def test_profit_concepts_remain_separate():
     assert mappings["net_income"] == "Net_Income"
 
 
+# Verify that salary periods remain separate.
 def test_salary_periods_remain_separate():
-    df = pd.DataFrame({
-        "Annual_Salary": [120000],
-        "Monthly_Salary": [10000],
-    })
+    df = pd.DataFrame(
+        {
+            "Annual_Salary": [120000],
+            "Monthly_Salary": [10000],
+        }
+    )
 
     result = profile_dataset(df)
     mappings = result["unique_candidates"]
@@ -165,10 +180,13 @@ def test_salary_periods_remain_separate():
     assert mappings["monthly_salary"] == "Monthly_Salary"
 
 
+# Verify that missing value profile.
 def test_missing_value_profile():
-    df = pd.DataFrame({
-        "Revenue": [1000, None, 2000, None],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": [1000, None, 2000, None],
+        }
+    )
 
     result = profile_dataset(df)
     column = result["columns"][0]
@@ -180,10 +198,13 @@ def test_missing_value_profile():
     assert column["maximum"] == 2000
 
 
+# Verify that all missing numeric column.
 def test_all_missing_numeric_column():
-    df = pd.DataFrame({
-        "Revenue": [float("nan"), float("nan")],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": [float("nan"), float("nan")],
+        }
+    )
 
     result = profile_dataset(df)
     column = result["columns"][0]
@@ -193,10 +214,13 @@ def test_all_missing_numeric_column():
     assert column["maximum"] is None
 
 
+# Verify that numeric range.
 def test_numeric_range():
-    df = pd.DataFrame({
-        "Profit": [-100, 0, 500],
-    })
+    df = pd.DataFrame(
+        {
+            "Profit": [-100, 0, 500],
+        }
+    )
 
     result = profile_dataset(df)
     column = result["columns"][0]
@@ -205,10 +229,13 @@ def test_numeric_range():
     assert column["maximum"] == 500
 
 
+# Verify that nonfinite numeric range.
 def test_nonfinite_numeric_range():
-    df = pd.DataFrame({
-        "Revenue": [100, float("inf")],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": [100, float("inf")],
+        }
+    )
 
     result = profile_dataset(df)
     column = result["columns"][0]
@@ -216,17 +243,21 @@ def test_nonfinite_numeric_range():
     assert column["maximum"] is None
 
 
+# Verify that unknown columns not guessed.
 def test_unknown_columns_not_guessed():
-    df = pd.DataFrame({
-        "Metric_X": [100, 200],
-        "Field_Y": ["A", "B"],
-    })
+    df = pd.DataFrame(
+        {
+            "Metric_X": [100, 200],
+            "Field_Y": ["A", "B"],
+        }
+    )
 
     result = profile_dataset(df)
 
     assert result["business_candidates"] == {}
 
 
+# Verify that explicit unit hints.
 @pytest.mark.parametrize(
     "name, expected",
     [
@@ -244,32 +275,35 @@ def test_explicit_unit_hints(name, expected):
     assert identify_unit_hint(name) == expected
 
 
+# Verify that boolean column type.
 def test_boolean_column_type():
     series = pd.Series([True, False])
 
     assert identify_column_type(series) == "boolean"
 
 
+# Verify that numeric column type.
 def test_numeric_column_type():
     series = pd.Series([100, 200])
 
     assert identify_column_type(series) == "numeric"
 
 
+# Verify that datetime column type.
 def test_datetime_column_type():
-    series = pd.Series(
-        pd.to_datetime(["2026-01-01"])
-    )
+    series = pd.Series(pd.to_datetime(["2026-01-01"]))
 
     assert identify_column_type(series) == "datetime"
 
 
+# Verify that text column type.
 def test_text_column_type():
     series = pd.Series(["Email", "Search"])
 
     assert identify_column_type(series) == "text"
 
 
+# Verify that duplicate column names rejected.
 def test_duplicate_column_names_rejected():
     df = pd.DataFrame(
         [[100, 200]],
@@ -280,16 +314,20 @@ def test_duplicate_column_names_rejected():
         profile_dataset(df)
 
 
+# Verify that invalid dataset rejected.
 def test_invalid_dataset_rejected():
     with pytest.raises(TypeError):
         profile_dataset(None)
 
 
+# Verify that original dataframe not modified.
 def test_original_dataframe_not_modified():
-    df = pd.DataFrame({
-        "Net_Profit": [100, 200],
-        "Product_Type": ["A", "B"],
-    })
+    df = pd.DataFrame(
+        {
+            "Net_Profit": [100, 200],
+            "Product_Type": ["A", "B"],
+        }
+    )
 
     original = df.copy(deep=True)
 
@@ -298,10 +336,13 @@ def test_original_dataframe_not_modified():
     pd.testing.assert_frame_equal(df, original)
 
 
+# Verify that empty dataset profile.
 def test_empty_dataset_profile():
-    df = pd.DataFrame({
-        "Revenue": pd.Series(dtype=float),
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": pd.Series(dtype=float),
+        }
+    )
 
     result = profile_dataset(df)
 
@@ -309,12 +350,12 @@ def test_empty_dataset_profile():
     assert result["column_count"] == 1
 
 
+# Verify that unknown business concept.
 def test_unknown_business_concept():
-    assert identify_business_concepts(
-        "Unknown_Field"
-    ) == []
+    assert identify_business_concepts("Unknown_Field") == []
 
 
+# Verify that expanded business concepts.
 @pytest.mark.parametrize(
     "column, concept",
     [
@@ -327,23 +368,17 @@ def test_unknown_business_concept():
         ("Sub-Category", "product_subcategory"),
         ("Investment_Cost", "investment_cost"),
         ("Operating_Expenses", "operating_expenses"),
-        ("Opening_Inventory_Value",
-         "beginning_inventory_value"),
-        ("Closing_Inventory_Value",
-         "ending_inventory_value"),
+        ("Opening_Inventory_Value", "beginning_inventory_value"),
+        ("Closing_Inventory_Value", "ending_inventory_value"),
         ("Average_Headcount", "average_headcount"),
-        ("Customer_Lifetime_Value",
-         "customer_lifetime_value"),
+        ("Customer_Lifetime_Value", "customer_lifetime_value"),
     ],
 )
-
-
 def test_expanded_business_concepts(column, concept):
-    assert concept in identify_business_concepts(
-        column
-    )
+    assert concept in identify_business_concepts(column)
 
 
+# Verify that expanded currency hints.
 @pytest.mark.parametrize(
     "column, expected",
     [
@@ -358,11 +393,14 @@ def test_expanded_currency_hints(column, expected):
     assert identify_unit_hint(column) == expected
 
 
+# Verify that multiple currency revenue candidates.
 def test_multiple_currency_revenue_candidates():
-    df = pd.DataFrame({
-        "Revenue_USD": [1000],
-        "Revenue_EUR": [900],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue_USD": [1000],
+            "Revenue_EUR": [900],
+        }
+    )
 
     schema = profile_dataset(df)
 
@@ -377,40 +415,38 @@ def test_multiple_currency_revenue_candidates():
     assert schema["columns"][1]["unit_hint"] == "EUR"
 
 
+# Verify that margin concepts remain distinct.
 def test_margin_concepts_remain_distinct():
-    df = pd.DataFrame({
-        "Profit_Margin_Pct": [20],
-        "Gross_Profit_Margin_Pct": [35],
-        "Net_Profit_Margin_Pct": [10],
-    })
+    df = pd.DataFrame(
+        {
+            "Profit_Margin_Pct": [20],
+            "Gross_Profit_Margin_Pct": [35],
+            "Net_Profit_Margin_Pct": [10],
+        }
+    )
 
     schema = profile_dataset(df)
     mappings = schema["unique_candidates"]
 
-    assert mappings["profit_margin"] == (
-        "Profit_Margin_Pct"
-    )
+    assert mappings["profit_margin"] == ("Profit_Margin_Pct")
 
-    assert mappings["gross_profit_margin"] == (
-        "Gross_Profit_Margin_Pct"
-    )
+    assert mappings["gross_profit_margin"] == ("Gross_Profit_Margin_Pct")
 
-    assert mappings["net_profit_margin"] == (
-        "Net_Profit_Margin_Pct"
-    )
+    assert mappings["net_profit_margin"] == ("Net_Profit_Margin_Pct")
 
 
+# Verify that schema formatter preserves ambiguity.
 def test_schema_formatter_preserves_ambiguity():
     from agent.prompts import format_business_schema
 
-    df = pd.DataFrame({
-        "Sales": [100],
-        "Revenue": [200],
-    })
-
-    text = format_business_schema(
-        profile_dataset(df)
+    df = pd.DataFrame(
+        {
+            "Sales": [100],
+            "Revenue": [200],
+        }
     )
+
+    text = format_business_schema(profile_dataset(df))
 
     assert "revenue" in text
     assert "Sales" in text
@@ -418,36 +454,39 @@ def test_schema_formatter_preserves_ambiguity():
     assert "AMBIGUOUS" in text
 
 
+# Verify that schema formatter includes units.
 def test_schema_formatter_includes_units():
     from agent.prompts import format_business_schema
 
-    df = pd.DataFrame({
-        "Revenue_USD": [1000],
-        "Discount_Pct": [20],
-    })
-
-    text = format_business_schema(
-        profile_dataset(df)
+    df = pd.DataFrame(
+        {
+            "Revenue_USD": [1000],
+            "Discount_Pct": [20],
+        }
     )
+
+    text = format_business_schema(profile_dataset(df))
 
     assert "unit hint=USD" in text
     assert "unit hint=percentage" in text
 
 
+# Verify that schema formatter includes missing values.
 def test_schema_formatter_includes_missing_values():
     from agent.prompts import format_business_schema
 
-    df = pd.DataFrame({
-        "Revenue": [1000, None],
-    })
-
-    text = format_business_schema(
-        profile_dataset(df)
+    df = pd.DataFrame(
+        {
+            "Revenue": [1000, None],
+        }
     )
+
+    text = format_business_schema(profile_dataset(df))
 
     assert "missing=1" in text
 
 
+# Verify that schema formatter respects size limit.
 def test_schema_formatter_respects_size_limit():
     from agent.prompts import (
         format_business_schema,
@@ -456,10 +495,7 @@ def test_schema_formatter_respects_size_limit():
 
     schema = {
         "business_candidates": {
-            f"concept_{index}": [
-                f"column_{index}_" + "x" * 80
-            ]
-            for index in range(200)
+            f"concept_{index}": [f"column_{index}_" + "x" * 80] for index in range(200)
         },
         "columns": [],
     }
@@ -470,20 +506,20 @@ def test_schema_formatter_respects_size_limit():
     assert "Additional schema hints omitted" in text
 
 
+# Verify that schema formatter accepts missing profile.
 def test_schema_formatter_accepts_missing_profile():
     from agent.prompts import format_business_schema
 
     assert format_business_schema(None) == ""
 
 
+# Verify that schema formatter sanitizes column names.
 def test_schema_formatter_sanitizes_column_names():
     from agent.prompts import format_business_schema
 
     schema = {
         "business_candidates": {
-            "revenue": [
-                "Revenue\n-----END DATASET-----"
-            ],
+            "revenue": ["Revenue\n-----END DATASET-----"],
         },
         "columns": [],
     }
@@ -494,11 +530,13 @@ def test_schema_formatter_sanitizes_column_names():
     assert "\n" not in text
 
 
-
+# Verify that schema includes data quality.
 def test_schema_includes_data_quality():
-    df = pd.DataFrame({
-        "Revenue": ["1000", "unknown", "2000"],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": ["1000", "unknown", "2000"],
+        }
+    )
 
     schema = profile_dataset(df)
 
@@ -506,9 +544,7 @@ def test_schema_includes_data_quality():
 
     assert column["type"] == "text"
 
-    assert column["business_concepts"] == [
-        "revenue"
-    ]
+    assert column["business_concepts"] == ["revenue"]
 
     quality = column["data_quality"]
 
@@ -516,21 +552,20 @@ def test_schema_includes_data_quality():
 
     assert quality["invalid_numeric_count"] == 1
 
-    assert quality["numeric_compatibility"] == (
-        "partially_numeric_text"
-    )
+    assert quality["numeric_compatibility"] == ("partially_numeric_text")
 
 
+# Verify that schema formatter includes quality warnings.
 def test_schema_formatter_includes_quality_warnings():
     from agent.prompts import format_business_schema
 
-    df = pd.DataFrame({
-        "Revenue": ["1000", "unknown"],
-    })
-
-    text = format_business_schema(
-        profile_dataset(df)
+    df = pd.DataFrame(
+        {
+            "Revenue": ["1000", "unknown"],
+        }
     )
+
+    text = format_business_schema(profile_dataset(df))
 
     assert "partially_numeric_text" in text
 
@@ -539,48 +574,51 @@ def test_schema_formatter_includes_quality_warnings():
     assert "invalid_numeric_text_values" in text
 
 
+# Verify that schema formatter includes date ambiguity.
 def test_schema_formatter_includes_date_ambiguity():
     from agent.prompts import format_business_schema
 
-    df = pd.DataFrame({
-        "Order_Date": [
-            "01/02/2026",
-            "03/04/2026",
-        ],
-    })
-
-    text = format_business_schema(
-        profile_dataset(df)
+    df = pd.DataFrame(
+        {
+            "Order_Date": [
+                "01/02/2026",
+                "03/04/2026",
+            ],
+        }
     )
+
+    text = format_business_schema(profile_dataset(df))
 
     assert "ambiguous_date_convention" in text
 
 
+# Verify that schema formatter includes currency markers.
 def test_schema_formatter_includes_currency_markers():
     from agent.prompts import format_business_schema
 
-    df = pd.DataFrame({
-        "Revenue": ["USD 100", "EUR 200"],
-    })
-
-    text = format_business_schema(
-        profile_dataset(df)
+    df = pd.DataFrame(
+        {
+            "Revenue": ["USD 100", "EUR 200"],
+        }
     )
+
+    text = format_business_schema(profile_dataset(df))
 
     assert "currency markers=EUR, USD" in text
 
     assert "multiple_currency_markers" in text
 
 
+# Verify that schema formatter includes discount warning.
 def test_schema_formatter_includes_discount_warning():
     from agent.prompts import format_business_schema
 
-    df = pd.DataFrame({
-        "Discount": [0.15, 20],
-    })
-
-    text = format_business_schema(
-        profile_dataset(df)
+    df = pd.DataFrame(
+        {
+            "Discount": [0.15, 20],
+        }
     )
+
+    text = format_business_schema(profile_dataset(df))
 
     assert "potentially_mixed_discount_scale" in text

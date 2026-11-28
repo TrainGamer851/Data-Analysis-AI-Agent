@@ -7,7 +7,6 @@ import pandas as pd
 from agent.debug_logger import debug_log, DebugTimer
 from agent.data_quality import inspect_column_quality
 
-
 # Candidate business concepts, not automatic substitutions.
 BUSINESS_ALIASES = {
     "revenue": {
@@ -277,8 +276,8 @@ BUSINESS_ALIASES = {
 }
 
 
+# Normalize a column name without modifying the dataset.
 def normalize_column_name(name):
-    """Normalize a column name without modifying the dataset."""
 
     text = str(name).strip()
 
@@ -309,15 +308,14 @@ def normalize_column_name(name):
     return " ".join(text.split())
 
 
+# Return candidate business concepts for a column.
 def identify_business_concepts(name):
-    """Return candidate business concepts for a column."""
 
     normalized = normalize_column_name(name)
 
     words = normalized.split()
 
-    # Currency suffixes describe units rather than
-    # changing the underlying business concept.
+    # Currency suffixes describe units rather than changing the underlying business concept.
     if words and words[-1] in {
         "usd",
         "eur",
@@ -338,33 +336,39 @@ def identify_business_concepts(name):
     ]
 
 
+# Identify the actual pandas column type.
 def identify_column_type(series):
-    """Identify the actual pandas column type."""
 
+    # Return `'boolean'` when `pd.api.types.is_bool_dtype(series.dtype)`.
     if pd.api.types.is_bool_dtype(series.dtype):
         return "boolean"
 
+    # Return `'datetime'` when `pd.api.types.is_datetime64_any_dtype(series.dtype)`.
     if pd.api.types.is_datetime64_any_dtype(series.dtype):
         return "datetime"
 
+    # Return `'numeric'` when `pd.api.types.is_numeric_dtype(series.dtype)`.
     if pd.api.types.is_numeric_dtype(series.dtype):
         return "numeric"
 
     return "text"
 
 
+# Convert a finite numeric value into a Python number.
 def safe_number(value):
-    """Convert a finite numeric value into a Python number."""
 
+    # Return `None` when `isinstance(value, bool)`.
     if isinstance(value, bool):
         return None
 
+    # Return `None` when `not isinstance(value, Real)`.
     if not isinstance(value, Real):
         return None
 
     try:
         number = float(value)
 
+        # Return `None` when `not math.isfinite(number)`.
         if not math.isfinite(number):
             return None
 
@@ -374,18 +378,17 @@ def safe_number(value):
         return None
 
 
+# Identify explicit unit hints without guessing scale.
 def identify_unit_hint(name):
-    """Identify explicit unit hints without guessing scale."""
 
     normalized = normalize_column_name(name)
     words = normalized.split()
 
-    if any(
-        word in words
-        for word in ("pct", "percent", "percentage")
-    ):
+    # Return `'percentage'` when `any((word in words for word in ('pct', 'percent', 'percentage')))`.
+    if any(word in words for word in ("pct", "percent", "percentage")):
         return "percentage"
 
+    # Return `'ratio'` when `'ratio' in words`.
     if "ratio" in words:
         return "ratio"
 
@@ -401,6 +404,7 @@ def identify_unit_hint(name):
 
     detected = currencies.intersection(words)
 
+    # Return the selected result when `len(detected) == 1`.
     if len(detected) == 1:
         return next(iter(detected)).upper()
 
@@ -411,8 +415,8 @@ def identify_unit_hint(name):
     return None
 
 
+# Collect descriptive information for one column.
 def profile_column(name, series):
-    """Collect descriptive information for one column."""
 
     column_type = identify_column_type(series)
 
@@ -427,28 +431,23 @@ def profile_column(name, series):
         "type": column_type,
         "missing_count": missing_count,
         "missing_pct": (
-            round(missing_count / row_count * 100, 2)
-            if row_count
-            else 0.0
+            round(missing_count / row_count * 100, 2) if row_count else 0.0
         ),
         "unique_count": unique_count,
-        "business_concepts": identify_business_concepts(
-            name
-        ),
+        "business_concepts": identify_business_concepts(name),
         "unit_hint": identify_unit_hint(name),
     }
 
+    # Update `valid` when `column_type == 'numeric'`.
     if column_type == "numeric":
         valid = series.dropna()
 
+        # Update `profile['minimum']` when `not valid.empty`.
         if not valid.empty:
-            profile["minimum"] = safe_number(
-                valid.min()
-            )
+            profile["minimum"] = safe_number(valid.min())
 
-            profile["maximum"] = safe_number(
-                valid.max()
-            )
+            profile["maximum"] = safe_number(valid.max())
+        # Update `profile['minimum']` when no earlier condition matches.
         else:
             profile["minimum"] = None
             profile["maximum"] = None
@@ -462,27 +461,26 @@ def profile_column(name, series):
     return profile
 
 
+# Build a non-mutating business schema profile.
 def profile_dataset(dataframe):
-    """Build a non-mutating business schema profile."""
 
     debug_log(
         "SCHEMA",
         "Starting dataset profiling",
     )
 
+    # Raise `TypeError` when `not isinstance(dataframe, pd.DataFrame)`.
     if not isinstance(dataframe, pd.DataFrame):
-        raise TypeError(
-            "Dataset must be a pandas DataFrame."
-        )
+        raise TypeError("Dataset must be a pandas DataFrame.")
 
+    # Raise `ValueError` when `not dataframe.columns.is_unique`.
     if not dataframe.columns.is_unique:
-        raise ValueError(
-            "Dataset contains duplicate column names."
-        )
+        raise ValueError("Dataset contains duplicate column names.")
 
     profiles = []
     candidates = {}
 
+    # Process each `name` from `dataframe.columns`.
     for name in dataframe.columns:
         column_profile = profile_column(
             name,
@@ -491,18 +489,15 @@ def profile_dataset(dataframe):
 
         profiles.append(column_profile)
 
-        for concept in column_profile[
-            "business_concepts"
-        ]:
+        # Process each `concept` from `column_profile['business_concepts']`.
+        for concept in column_profile["business_concepts"]:
             candidates.setdefault(
                 concept,
                 [],
             ).append(str(name))
 
     ambiguous = {
-        concept: columns
-        for concept, columns in candidates.items()
-        if len(columns) > 1
+        concept: columns for concept, columns in candidates.items() if len(columns) > 1
     }
 
     unique_candidates = {
@@ -522,20 +517,17 @@ def profile_dataset(dataframe):
 
     debug_log(
         "SCHEMA",
-        f"Profiled {result['row_count']} rows "
-        f"and {result['column_count']} columns",
+        f"Profiled {result['row_count']} rows " f"and {result['column_count']} columns",
     )
 
     debug_log(
         "SCHEMA",
-        f"Recognized business concepts: "
-        f"{list(candidates)}",
+        f"Recognized business concepts: " f"{list(candidates)}",
     )
 
     debug_log(
         "SCHEMA",
-        f"Ambiguous business concepts: "
-        f"{list(ambiguous)}",
+        f"Ambiguous business concepts: " f"{list(ambiguous)}",
     )
 
     quality_timer = DebugTimer("DATA QUALITY")
@@ -543,6 +535,7 @@ def profile_dataset(dataframe):
     warning_count = 0
     affected_columns = 0
 
+    # Process each `column` from `profiles`.
     for column in profiles:
         quality = column.get(
             "data_quality",
@@ -554,16 +547,17 @@ def profile_dataset(dataframe):
             [],
         )
 
+        # Update `affected_columns` when `warnings`.
         if warnings:
             affected_columns += 1
             warning_count += len(warnings)
 
             debug_log(
                 "DATA QUALITY",
-                f"Column: {column['name']} | "
-                f"Warnings: {warnings}",
+                f"Column: {column['name']} | " f"Warnings: {warnings}",
             )
 
+        # Call `debug_log` when `quality.get('numeric_compatibility') in {'numeric_text', 'formatted_numeric_text',...`.
         if quality.get("numeric_compatibility") in {
             "numeric_text",
             "formatted_numeric_text",
@@ -586,9 +580,7 @@ def profile_dataset(dataframe):
         f"Total warnings: {warning_count}",
     )
 
-    quality_timer.finish(
-        "Data-quality reporting completed"
-    )
+    quality_timer.finish("Data-quality reporting completed")
 
     debug_log(
         "SCHEMA",

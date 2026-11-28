@@ -1,22 +1,3 @@
-"""Run LLM-generated pandas code in an isolated worker (sandbox_worker.py).
-
-Now become the core of a sandbox.
-
-execute_code() sends the code and the DataFrame 
-    to a worker process and returns the answer as a dict.
-    
-The SANDBOX_BACKEND environment variable picks where the worker runs:
-
-    local (default) The previous version that implemented
-        using purely subprocess isolation and restrictions:
-            a fresh `python -I` subprocess with an empty environment.
-            Defense in depth, NOT a true sandbox. (Using mainly for testing development.)
-    docker (new - required installation of Docker Desktop)
-        Same worker in an additional layer - locked-down container:
-            no network, read-only filesystem, non-root, dropped capabilities, memory/CPU/process limits.
-        The image is built automatically on first use.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -34,14 +15,15 @@ import pandas as pd
 from agent.debug_logger import debug_log, DebugTimer
 
 STARTUP_GRACE = 10  # extra seconds for interpreter + pandas startup
-MAX_ROWS = 200      # change this please change also in prompts.py
+MAX_ROWS = 200  # change this please change also in prompts.py
 
 IMAGE = "data-agent-sandbox"
- 
+
 _CURR = os.path.dirname(os.path.abspath(__file__))
 _WORKER = os.path.join(_CURR, "sandbox_worker.py")
 _DOCKERFILE = os.path.join(os.path.dirname(_CURR), "docker", "Dockerfile")
 _image_ready = False  # checked once per process
+
 
 # default return
 def _fail(message: str) -> dict:
@@ -55,21 +37,22 @@ def _fail(message: str) -> dict:
         "result": None,
         "result_type": None,
         "stdout": "",
-        "error": message
-        }
+        "error": message,
+    }
+
 
 # Parent side (App part)
 
-# Clean the LLM output
+
+# Clean the LLM output Pull plain Python out of an LLM reply that may contain markdown fences.
 def clean_code(text: str) -> str:
-    """Pull plain Python out of an LLM reply that may contain markdown fences."""
     fenced = re.search(r"```(?:python|py)?[ \t]*\n(.*?)```", text or "", re.DOTALL)
     text = fenced.group(1) if fenced else (text or "")
     return text.replace("```python", "").replace("```", "").strip()
 
-# Docker helpers
+
+# Docker helpers True when Docker is installed and its daemon is running.
 def docker_available() -> bool:
-    """True when Docker is installed and its daemon is running."""
 
     timer = DebugTimer("DOCKER")
 
@@ -109,9 +92,10 @@ def docker_available() -> bool:
 
     finally:
         timer.finish("Docker availability check finished")
- 
+
+
+# Check sandbox image exists and matches installed pandas.
 def prepare_sandbox() -> str | None:
-    """Check sandbox image exists and matches installed pandas."""
 
     global _image_ready
 
@@ -122,6 +106,7 @@ def prepare_sandbox() -> str | None:
         f"Preparing sandbox image: {IMAGE}",
     )
 
+    # Call `debug_log` when `_image_ready`.
     if _image_ready:
         debug_log(
             "DOCKER IMAGE",
@@ -161,16 +146,15 @@ def prepare_sandbox() -> str | None:
             f"Inspection exit code: {r.returncode}",
         )
 
+        # Call `debug_log` when `r.returncode == 0`.
         if r.returncode == 0:
             debug_log(
                 "DOCKER IMAGE",
                 f"Installed image pandas version: {image_version}",
             )
 
-        if (
-            r.returncode == 0
-            and image_version == pd.__version__
-        ):
+        # Update `_image_ready` when `r.returncode == 0 and image_version == pd.__version__`.
+        if r.returncode == 0 and image_version == pd.__version__:
             _image_ready = True
 
             timer.finish("Existing sandbox image verified")
@@ -232,17 +216,14 @@ def prepare_sandbox() -> str | None:
 
         return "Execution Error: building the sandbox image timed out."
 
+    # Call `debug_log` when `build.returncode != 0`.
     if build.returncode != 0:
         debug_log(
             "DOCKER ERROR",
             f"Image build exit code: {build.returncode}",
         )
 
-        tail = (
-            build.stderr
-            .decode("utf-8", "replace")
-            .strip()[-400:]
-        )
+        tail = build.stderr.decode("utf-8", "replace").strip()[-400:]
 
         return (
             "Execution Error: could not build the sandbox image. "
@@ -255,25 +236,56 @@ def prepare_sandbox() -> str | None:
 
     return None
 
+
+# docker run` flags for the locked-down container (image and command are appended).
 def _docker_base(name: str, memory_mb: int) -> list[str]:
-    """`docker run` flags for the locked-down container (image and command are appended)."""
     limit = f"{memory_mb + 512}m"  # headroom for the Python + pandas baseline
     return [
-        "docker", "run", "--rm", "-i", "--name", name,
-        "--network", "none", # stop network activity
-        "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
-        "--memory", limit, "--memory-swap", limit,  # fixed mem cap, no swap
-        "--cpus", "1", "--pids-limit", "64",  # limited CPU and fork-bomb
-        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        "--user", "65534:65534",  # any, but not root
-        "-e", "OMP_NUM_THREADS=1", "-e", "OPENBLAS_NUM_THREADS=1", "-e", "MKL_NUM_THREADS=1",
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--name",
+        name,
+        "--network",
+        "none",  # stop network activity
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=16m",
+        "--memory",
+        limit,
+        "--memory-swap",
+        limit,  # fixed mem cap, no swap
+        "--cpus",
+        "1",
+        "--pids-limit",
+        "64",  # limited CPU and fork-bomb
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        "65534:65534",  # any, but not root
+        "-e",
+        "OMP_NUM_THREADS=1",
+        "-e",
+        "OPENBLAS_NUM_THREADS=1",
+        "-e",
+        "MKL_NUM_THREADS=1",
         # only worker script is shared with the host, in read-only
-        "--mount", f"type=bind,source={_WORKER},target=/app/sandbox_worker.py,readonly",
+        "--mount",
+        f"type=bind,source={_WORKER},target=/app/sandbox_worker.py,readonly",
     ]
 
-# Set up the subprocess env to run the LLM code
-def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
-                 memory_mb: int = 1024, max_rows: int = MAX_ROWS) -> dict:
+
+# Set up the subprocess env to run the LLM code Run code with `df`, `pd`, `np` available; the code must set `result`.
+def execute_code(
+    code_string: str,
+    df: pd.DataFrame,
+    timeout: int = 10,
+    memory_mb: int = 1024,
+    max_rows: int = MAX_ROWS,
+) -> dict:
     """Run code with `df`, `pd`, `np` available; the code must set `result`.
 
     Returns{
@@ -304,8 +316,10 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         f"Cleaned code characters: {len(code)}",
     )
 
+    # Return the selected result when `not code`.
     if not code:
         return _fail("Execution Error: no code was provided.")
+    # Return the selected result when `df is None or df.empty`.
     if df is None or df.empty:
         return _fail("Execution Error: the dataset DataFrame is empty or None.")
 
@@ -318,8 +332,7 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
 
     debug_log(
         "EXECUTION",
-        f"Dataset: {df.shape[0]:,} rows | "
-        f"{df.shape[1]} columns",
+        f"Dataset: {df.shape[0]:,} rows | " f"{df.shape[1]} columns",
     )
 
     debug_log(
@@ -334,14 +347,18 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
 
     job_id = os.environ.get("ANALYSIS_JOB_ID", "")
 
+    # Update `job_id` when `not re.fullmatch('[a-f0-9]{32}', job_id)`.
     if not re.fullmatch(r"[a-f0-9]{32}", job_id):
         job_id = ""
 
+    # Update `name` when `job_id`.
     if job_id:
         name = f"sandbox-{job_id}-{uuid.uuid4().hex[:12]}"
+    # Update `name` when no earlier condition matches.
     else:
         name = f"sandbox-{uuid.uuid4().hex[:12]}"
 
+    # Call `debug_log` when `docker`.
     if docker:
         debug_log(
             "DOCKER",
@@ -349,6 +366,7 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         )
 
         error = prepare_sandbox()
+        # Return the selected result when `error`.
         if error:
             return _fail(error)
         cmd = _docker_base(name, memory_mb)
@@ -373,19 +391,22 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
             f"Container memory limit: {memory_mb + 512} MB",
         )
 
+        # Update `cmd` when `job_id`.
         if job_id:
             cmd += ["--label", f"data-analysis-job={job_id}"]
 
         cmd += [IMAGE, "python", "-I", "/app/sandbox_worker.py"]
         env = None  # the docker client needs PATH etc.; the container only gets the -e flags
+    # Update `cmd` when no earlier condition matches.
     else:
         cmd = [sys.executable, "-I", _WORKER]
-        # Set the child environment 
+        # Set the child environment
         env = {
             "OMP_NUM_THREADS": "1",
             "OPENBLAS_NUM_THREADS": "1",
-            "MKL_NUM_THREADS": "1"
-            }
+            "MKL_NUM_THREADS": "1",
+        }
+        # Update `env['SYSTEMROOT']` when `os.name == 'nt'`.
         if os.name == "nt":  # Python on Windows
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
 
@@ -396,17 +417,13 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         "Serializing code and dataset for sandbox worker",
     )
 
-    payload = pickle.dumps({
-        "code": code,
-        "df": df,
-        "memory_mb": memory_mb,
-        "max_rows": max_rows
-    })
+    payload = pickle.dumps(
+        {"code": code, "df": df, "memory_mb": memory_mb, "max_rows": max_rows}
+    )
 
     debug_log(
         "PAYLOAD",
-        f"Serialized payload size: "
-        f"{len(payload) / 1024:,.2f} KB",
+        f"Serialized payload size: " f"{len(payload) / 1024:,.2f} KB",
     )
 
     payload_timer.finish("Payload serialization completed")
@@ -415,8 +432,7 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
 
     debug_log(
         "EXECUTION",
-        f"Code timeout: {timeout}s | "
-        f"Effective wall timeout: {effective_timeout}s",
+        f"Code timeout: {timeout}s | " f"Effective wall timeout: {effective_timeout}s",
     )
 
     with tempfile.TemporaryDirectory(
@@ -461,19 +477,21 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
                 f"Worker exceeded {effective_timeout}s wall limit",
             )
 
-            if docker: #kill docker
+            # Call `debug_log` when `docker`.
+            if docker:  # kill docker
                 debug_log(
                     "DOCKER",
                     f"Attempting to kill timed-out container: {name}",
                 )
                 with contextlib.suppress(Exception):
-                    subprocess.run(["docker", "kill", name],
-                        capture_output=True,
-                        timeout=10
-                        )
-            return _fail(f"Execution Error: code timed out after {timeout} seconds "
-                         f"(wall limit {effective_timeout}s including startup). "
-                         f"Use vectorized pandas operations.")
+                    subprocess.run(
+                        ["docker", "kill", name], capture_output=True, timeout=10
+                    )
+            return _fail(
+                f"Execution Error: code timed out after {timeout} seconds "
+                f"(wall limit {effective_timeout}s including startup). "
+                f"Use vectorized pandas operations."
+            )
         except OSError as exc:
             return _fail(f"Execution Error: could not start the sandbox ({exc})")
 
@@ -484,10 +502,7 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
         )
 
         result = json.loads(
-            proc.stdout
-            .decode("utf-8", "replace")
-            .strip()
-            .splitlines()[-1]
+            proc.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
         )
 
         debug_log(
@@ -500,11 +515,11 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
             f"Result type: {result.get('result_type')}",
         )
 
+        # Call `debug_log` when `result.get('result_type') == 'table'`.
         if result.get("result_type") == "table":
             debug_log(
                 "RESULT",
-                f"Returned table rows: "
-                f"{len(result.get('result') or [])}",
+                f"Returned table rows: " f"{len(result.get('result') or [])}",
             )
 
         timer.finish("Sandbox execution pipeline finished")
@@ -517,11 +532,7 @@ def execute_code(code_string: str, df: pd.DataFrame, timeout: int = 10,
             "Unable to decode sandbox worker response",
         )
 
-        stderr = (
-            proc.stderr
-            .decode("utf-8", "replace")
-            .strip()[-400:]
-        )
+        stderr = proc.stderr.decode("utf-8", "replace").strip()[-400:]
 
         timer.finish("Sandbox execution pipeline failed")
 

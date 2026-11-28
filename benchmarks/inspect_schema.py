@@ -1,5 +1,3 @@
-"""Inspect business schema candidates for a CSV dataset."""
-
 import argparse
 import json
 
@@ -8,10 +6,9 @@ import pandas as pd
 from agent.dataset_schema import profile_dataset
 
 
+# Run the module's command-line workflow.
 def main():
-    parser = argparse.ArgumentParser(
-        description="Inspect a business CSV schema."
-    )
+    parser = argparse.ArgumentParser(description="Inspect a business CSV schema.")
 
     parser.add_argument(
         "csv_path",
@@ -45,5 +42,6 @@ def main():
     )
 
 
+# Call `main` when `__name__ == '__main__'`.
 if __name__ == "__main__":
     main()

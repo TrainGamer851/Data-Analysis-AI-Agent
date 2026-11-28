@@ -3,13 +3,11 @@ import re
 from agent.dataset_schema import normalize_column_name
 from agent.debug_logger import debug_log, DebugTimer
 
-
 DATE_CONCEPTS = {
     "transaction_date",
     "order_date",
     "shipping_date",
 }
-
 
 DATE_WARNINGS = {
     "ambiguous_date_convention",
@@ -18,13 +16,11 @@ DATE_WARNINGS = {
     "unrecognized_date_format",
 }
 
-
 DISCOUNT_WARNINGS = {
     "potentially_mixed_discount_scale",
     "mixed_percentage_notation",
     "discount_ratio_above_one",
 }
-
 
 AGGREGATION_PATTERN = (
     r"(?:calculate|compute|find|show|what is|what are|"
@@ -36,14 +32,14 @@ AGGREGATION_PATTERN = (
 )
 
 
+# Normalize question wording for conservative matching.
 def normalize_question(question):
-    """Normalize question wording for conservative matching."""
 
     return normalize_column_name(question)
 
 
+# Return a normal analysis response, not an execution error.
 def make_response(answer):
-    """Return a normal analysis response, not an execution error."""
 
     return {
         "answer": answer,
@@ -52,8 +48,8 @@ def make_response(answer):
     }
 
 
+# Identify explicit requests to calculate valid values only.
 def explicitly_allows_exclusions(question):
-    """Identify explicit requests to calculate valid values only."""
 
     text = normalize_question(question)
 
@@ -67,45 +63,37 @@ def explicitly_allows_exclusions(question):
         r"\bignore (?:the )?missing\b",
     )
 
-    return any(
-        re.search(pattern, text)
-        for pattern in patterns
-    )
+    return any(re.search(pattern, text) for pattern in patterns)
 
 
+# Recognize an explicitly supplied date convention.
 def explicit_date_convention(question):
-    """Recognize an explicitly supplied date convention."""
 
     text = normalize_question(question)
 
     month_first = bool(
         re.search(
-            r"\b(?:mm dd yyyy|mm dd yy|"
-            r"month first|month day year)\b",
+            r"\b(?:mm dd yyyy|mm dd yy|" r"month first|month day year)\b",
             text,
         )
     )
 
     day_first = bool(
         re.search(
-            r"\b(?:dd mm yyyy|dd mm yy|"
-            r"day first|day month year)\b",
+            r"\b(?:dd mm yyyy|dd mm yy|" r"day first|day month year)\b",
             text,
         )
     )
 
+    # Return `None` when `month_first == day_first`.
     if month_first == day_first:
         return None
 
-    return (
-        "month_first"
-        if month_first
-        else "day_first"
-    )
+    return "month_first" if month_first else "day_first"
 
 
+# Recognize an explicit mixed-discount conversion rule.
 def explicitly_defines_discount_scale(question):
-    """Recognize an explicit mixed-discount conversion rule."""
 
     text = normalize_question(question)
 
@@ -127,26 +115,16 @@ def explicitly_defines_discount_scale(question):
 
     conversion_rule = bool(
         re.search(
-            r"\b(?:multiply|convert|treat|interpret|"
-            r"represent|assume)\b",
+            r"\b(?:multiply|convert|treat|interpret|" r"represent|assume)\b",
             text,
         )
     )
 
-    return (
-        fractional_rule
-        and percentage_rule
-        and conversion_rule
-    )
+    return fractional_rule and percentage_rule and conversion_rule
 
 
+# Resolve a simple whole-column aggregation.
 def resolve_simple_aggregation(question, schema):
-    """
-    Resolve a simple whole-column aggregation.
-
-    Complex filters, comparisons and unfamiliar expressions
-    are intentionally left to the general AI agent.
-    """
 
     text = normalize_question(question)
 
@@ -155,6 +133,7 @@ def resolve_simple_aggregation(question, schema):
         text,
     )
 
+    # Return `None` when `not match`.
     if not match:
         return None
 
@@ -176,12 +155,9 @@ def resolve_simple_aggregation(question, schema):
     columns = schema.get("columns", [])
 
     # Prefer an explicitly identified column.
-    exact = [
-        column
-        for column in columns
-        if column["normalized_name"] == target
-    ]
+    exact = [column for column in columns if column["normalized_name"] == target]
 
+    # Return the selected result when `len(exact) == 1`.
     if len(exact) == 1:
         return exact[0]
 
@@ -190,31 +166,32 @@ def resolve_simple_aggregation(question, schema):
 
     concepts = identify_business_concepts(target)
 
+    # Return `None` when `len(concepts) != 1`.
     if len(concepts) != 1:
         return None
 
     candidates = [
         column
         for column in columns
-        if concepts[0] in column.get(
-            "business_concepts", []
-        )
+        if concepts[0] in column.get("business_concepts", [])
     ]
 
+    # Return the selected result when `len(candidates) == 1`.
     if len(candidates) == 1:
         return candidates[0]
 
     return None
 
 
+# Prevent incomplete whole-column numeric totals.
 def check_numeric_aggregation(question, schema):
-    """Prevent incomplete whole-column numeric totals."""
 
     column = resolve_simple_aggregation(
         question,
         schema,
     )
 
+    # Return `None` when `column is None`.
     if column is None:
         return None
 
@@ -224,15 +201,11 @@ def check_numeric_aggregation(question, schema):
 
     missing_count = column.get("missing_count", 0)
 
-    invalid_count = quality.get(
-        "invalid_numeric_count", 0
-    )
+    invalid_count = quality.get("invalid_numeric_count", 0)
 
     valid_count = quality.get("numeric_count", 0)
 
-    compatibility = quality.get(
-        "numeric_compatibility"
-    )
+    compatibility = quality.get("numeric_compatibility")
 
     debug_log(
         "INTEGRITY",
@@ -242,8 +215,7 @@ def check_numeric_aggregation(question, schema):
         f"Invalid: {invalid_count}",
     )
 
-    # Do not guess how arbitrary text or identifiers
-    # should be aggregated.
+    # Do not guess how arbitrary text or identifiers should be aggregated.
     if compatibility in {
         "boolean",
         "datetime",
@@ -258,13 +230,12 @@ def check_numeric_aggregation(question, schema):
 
     excluded_count = missing_count + invalid_count
 
+    # Return `None` when `excluded_count == 0`.
     if excluded_count == 0:
         return None
 
-    if (
-        explicitly_allows_exclusions(question)
-        and valid_count > 0
-    ):
+    # Call `debug_log` when `explicitly_allows_exclusions(question) and valid_count > 0`.
+    if explicitly_allows_exclusions(question) and valid_count > 0:
         debug_log(
             "INTEGRITY",
             "Explicit valid-values-only request detected",
@@ -284,8 +255,8 @@ def check_numeric_aggregation(question, schema):
     )
 
 
+# Check date ambiguity for clearly time-based analysis.
 def check_date_integrity(question, schema):
-    """Check date ambiguity for clearly time-based analysis."""
 
     text = normalize_question(question)
 
@@ -301,9 +272,7 @@ def check_date_integrity(question, schema):
     date_columns = [
         column
         for column in schema.get("columns", [])
-        if DATE_CONCEPTS.intersection(
-            column.get("business_concepts", [])
-        )
+        if DATE_CONCEPTS.intersection(column.get("business_concepts", []))
     ]
 
     # Prefer a date column explicitly named in the question.
@@ -311,13 +280,12 @@ def check_date_integrity(question, schema):
         column
         for column in date_columns
         if re.search(
-            r"\b"
-            + re.escape(column["normalized_name"])
-            + r"\b",
+            r"\b" + re.escape(column["normalized_name"]) + r"\b",
             text,
         )
     ]
 
+    # Update `date_columns` when `len(named_columns) == 1`.
     if len(named_columns) == 1:
         date_columns = named_columns
 
@@ -327,14 +295,11 @@ def check_date_integrity(question, schema):
 
     column = date_columns[0]
 
-    warnings = set(
-        column.get("data_quality", {}).get(
-            "warnings", []
-        )
-    )
+    warnings = set(column.get("data_quality", {}).get("warnings", []))
 
     relevant = warnings.intersection(DATE_WARNINGS)
 
+    # Return `None` when `not relevant`.
     if not relevant:
         return None
 
@@ -342,10 +307,10 @@ def check_date_integrity(question, schema):
 
     debug_log(
         "INTEGRITY",
-        f"Relevant date column: {name} | "
-        f"Warnings: {sorted(relevant)}",
+        f"Relevant date column: {name} | " f"Warnings: {sorted(relevant)}",
     )
 
+    # Return the selected result when `'conflicting_date_conventions' in relevant`.
     if "conflicting_date_conventions" in relevant:
         return make_response(
             f"Cannot calculate reliable time-based results "
@@ -354,7 +319,9 @@ def check_date_integrity(question, schema):
             "provide a rule for interpreting the mixed formats."
         )
 
+    # Evaluate the nested condition when `'ambiguous_date_convention' in relevant`.
     if "ambiguous_date_convention" in relevant:
+        # Call `debug_log` when `explicit_date_convention(question)`.
         if explicit_date_convention(question):
             debug_log(
                 "INTEGRITY",
@@ -376,11 +343,12 @@ def check_date_integrity(question, schema):
     )
 
 
+# Prevent unsupported discount-scale conversions.
 def check_discount_integrity(question, schema):
-    """Prevent unsupported discount-scale conversions."""
 
     text = normalize_question(question)
 
+    # Return `None` when `not re.search('\\bdiscounts?\\b', text)`.
     if not re.search(
         r"\bdiscounts?\b",
         text,
@@ -399,26 +367,20 @@ def check_discount_integrity(question, schema):
     candidates = [
         column
         for column in schema.get("columns", [])
-        if "discount" in column.get(
-            "business_concepts", []
-        )
+        if "discount" in column.get("business_concepts", [])
     ]
 
+    # Return `None` when `len(candidates) != 1`.
     if len(candidates) != 1:
         return None
 
     column = candidates[0]
 
-    warnings = set(
-        column.get("data_quality", {}).get(
-            "warnings", []
-        )
-    )
+    warnings = set(column.get("data_quality", {}).get("warnings", []))
 
-    relevant = warnings.intersection(
-        DISCOUNT_WARNINGS
-    )
+    relevant = warnings.intersection(DISCOUNT_WARNINGS)
 
+    # Return `None` when `not relevant`.
     if not relevant:
         return None
 
@@ -426,10 +388,10 @@ def check_discount_integrity(question, schema):
 
     debug_log(
         "INTEGRITY",
-        f"Relevant discount column: {name} | "
-        f"Warnings: {sorted(relevant)}",
+        f"Relevant discount column: {name} | " f"Warnings: {sorted(relevant)}",
     )
 
+    # Call `debug_log` when `explicitly_defines_discount_scale(question)`.
     if explicitly_defines_discount_scale(question):
         debug_log(
             "INTEGRITY",
@@ -447,13 +409,8 @@ def check_discount_integrity(question, schema):
     )
 
 
+# Return a clarification response when a relevant
 def validate_analysis_integrity(question, schema):
-    """
-    Return a clarification response when a relevant
-    data-quality issue prevents a reliable calculation.
-
-    Return None when analysis may continue.
-    """
 
     timer = DebugTimer("INTEGRITY")
 
@@ -462,10 +419,9 @@ def validate_analysis_integrity(question, schema):
         "Starting question-aware data-integrity validation",
     )
 
+    # Call `timer.finish` when `not isinstance(schema, dict)`.
     if not isinstance(schema, dict):
-        timer.finish(
-            "Validation skipped: dataset profile unavailable"
-        )
+        timer.finish("Validation skipped: dataset profile unavailable")
 
         return None
 
@@ -475,6 +431,7 @@ def validate_analysis_integrity(question, schema):
         check_numeric_aggregation,
     )
 
+    # Process each `check` from `checks`.
     for check in checks:
         debug_log(
             "INTEGRITY",
@@ -483,20 +440,17 @@ def validate_analysis_integrity(question, schema):
 
         response = check(question, schema)
 
+        # Call `debug_log` when `response is not None`.
         if response is not None:
             debug_log(
                 "INTEGRITY",
                 f"Clarification required by {check.__name__}",
             )
 
-            timer.finish(
-                "Analysis paused for data-integrity clarification"
-            )
+            timer.finish("Analysis paused for data-integrity clarification")
 
             return response
 
-    timer.finish(
-        "Data-integrity checks completed; analysis may continue"
-    )
+    timer.finish("Data-integrity checks completed; analysis may continue")
 
     return None

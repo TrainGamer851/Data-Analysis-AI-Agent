@@ -1,8 +1,3 @@
-"""Tests for the agent runner (agent/agent_runner.py) using a fake LLM.
-
-The fake replaces generate_response(), so these tests run the real mini-swe-agent
-loop and the real code sandbox, but never call NRP and need no API key.
-"""
 import pandas as pd
 import pytest
 
@@ -13,46 +8,56 @@ from agent.agent_runner import DataAnalysisEnvironment, run_analysis
 class FakeLLM:
     """Stands in for generate_response(): returns scripted replies in order."""
 
+    # Initialize the object and store its starting state.
     def __init__(self, *replies):
         self.replies = list(replies)
         self.calls = []  # the messages sent on each call
 
+    # Run the object when it is called like a function.
     def __call__(self, messages, **kwargs):
         self.calls.append(messages)
+        # Raise `AssertionError` when `not self.replies`.
         if not self.replies:
             raise AssertionError("FakeLLM was called more times than scripted")
         reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        # Raise `reply` when `isinstance(reply, Exception)`.
         if isinstance(reply, Exception):
             raise reply
         return reply
 
 
+# No NRP and no Docker: fake model config, local sandbox.
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
-    """No NRP and no Docker: fake model config, local sandbox."""
     monkeypatch.setenv("SANDBOX_BACKEND", "local")
     monkeypatch.setattr(runner, "get_model_config", lambda: {"model": "fake-llm"})
 
 
+# Install a FakeLLM with the given replies and return it.
 @pytest.fixture
 def fake_llm(monkeypatch):
-    """Install a FakeLLM with the given replies and return it."""
+
+    # Simulate a successful package installation for the test.
     def install(*replies):
         llm = FakeLLM(*replies)
         monkeypatch.setattr(runner, "generate_response", llm)
         return llm
+
     return install
 
 
+# Create the csv file fixture used by the tests.
 @pytest.fixture
 def csv_file(tmp_path):
     path = tmp_path / "orders.csv"
-    pd.DataFrame({
-        "Order ID": ["A1", "A1", "A2", "A3"],
-        "Region": ["West", "West", "East", "South"],
-        "Sales": [100.0, 50.0, 200.0, 25.5],
-        "Profit": [10.0, -5.0, 40.0, 2.5],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Order ID": ["A1", "A1", "A2", "A3"],
+            "Region": ["West", "West", "East", "South"],
+            "Sales": [100.0, 50.0, 200.0, 25.5],
+            "Profit": [10.0, -5.0, 40.0, 2.5],
+        }
+    ).to_csv(path, index=False)
     return str(path)
 
 
@@ -60,6 +65,8 @@ def csv_file(tmp_path):
 # Input validation (the LLM must not be called)
 # ---------------------------------------------------------------------------
 
+
+# Verify that blank question is rejected.
 @pytest.mark.parametrize("question", ["", "   ", None])
 def test_blank_question_is_rejected(fake_llm, csv_file, question):
     llm = fake_llm("result = 1")
@@ -72,6 +79,7 @@ def test_blank_question_is_rejected(fake_llm, csv_file, question):
     assert llm.calls == []
 
 
+# Verify that empty csv is rejected.
 def test_empty_csv_is_rejected(fake_llm, tmp_path):
     path = tmp_path / "empty.csv"
     path.write_text("Order ID,Sales\n")
@@ -81,9 +89,12 @@ def test_empty_csv_is_rejected(fake_llm, tmp_path):
     assert llm.calls == []
 
 
+# Verify that missing csv returns error.
 def test_missing_csv_returns_error(fake_llm, tmp_path):
     llm = fake_llm("result = 1")
-    out = run_analysis(str(tmp_path / "nope.csv"), "What are total sales?", explain=False)
+    out = run_analysis(
+        str(tmp_path / "nope.csv"), "What are total sales?", explain=False
+    )
     assert out["answer"] is None
     assert out["table"] is None
     assert out["error"]
@@ -94,6 +105,8 @@ def test_missing_csv_returns_error(fake_llm, tmp_path):
 # Successful runs
 # ---------------------------------------------------------------------------
 
+
+# Verify that scalar answer.
 def test_scalar_answer(fake_llm, csv_file):
     llm = fake_llm("result = round(df['Sales'].sum(), 2)")
     out = run_analysis(csv_file, "What are total sales?", explain=False)
@@ -101,20 +114,23 @@ def test_scalar_answer(fake_llm, csv_file):
     assert len(llm.calls) == 1
 
 
+# Verify that grouped answer comes back as rows.
 def test_grouped_answer_comes_back_as_rows(fake_llm, csv_file):
     fake_llm("result = df.groupby('Region')['Sales'].sum()")
-    out = run_analysis(csv_file,"Total sales by region?", explain=False)
+    out = run_analysis(csv_file, "Total sales by region?", explain=False)
     assert out["error"] is None
     assert out["answer"] == "The analysis returned 3 row(s)."
     assert {"Region": "West", "Sales": 150.0} in out["table"]
 
 
+# Verify that code in markdown fences still runs.
 def test_code_in_markdown_fences_still_runs(fake_llm, csv_file):
     llm = fake_llm("```python\nresult = df['Order ID'].nunique()\n```")
     out = run_analysis(csv_file, "How many unique orders?", explain=False)
     assert out == {"answer": "3", "table": None, "error": None}
 
 
+# Verify that prompt contains question and schema.
 def test_prompt_contains_question_and_schema(fake_llm, csv_file):
     llm = fake_llm("result = 1")
     run_analysis(csv_file, "Which region is most profitable?", explain=False)
@@ -124,6 +140,7 @@ def test_prompt_contains_question_and_schema(fake_llm, csv_file):
     assert "business data analysis assistant" in first_call[0]["content"]
     user_text = " ".join(m["content"] for m in first_call if m["role"] == "user")
     assert "Which region is most profitable?" in user_text
+    # Process each `column` from `('Order ID', 'Region', 'Sales', 'Profit')`.
     for column in ("Order ID", "Region", "Sales", "Profit"):
         assert column in user_text
 
@@ -132,9 +149,11 @@ def test_prompt_contains_question_and_schema(fake_llm, csv_file):
 # Retries and failures
 # ---------------------------------------------------------------------------
 
+
+# Verify that failed code is retried with the error.
 def test_failed_code_is_retried_with_the_error(fake_llm, csv_file):
     llm = fake_llm(
-        "result = df['Revenue'].sum()",        # wrong column -> KeyError
+        "result = df['Revenue'].sum()",  # wrong column -> KeyError
         "result = round(df['Sales'].sum(), 2)",  # corrected
     )
     out = run_analysis(csv_file, "What are total sales?", explain=False)
@@ -146,6 +165,7 @@ def test_failed_code_is_retried_with_the_error(fake_llm, csv_file):
     assert "Revenue" in feedback["content"]
 
 
+# Verify that agent gives up after step limit.
 def test_agent_gives_up_after_step_limit(fake_llm, csv_file):
     llm = fake_llm("result = 1 / 0")
     out = run_analysis(csv_file, "What are total sales?", explain=False)
@@ -155,6 +175,7 @@ def test_agent_gives_up_after_step_limit(fake_llm, csv_file):
     assert len(llm.calls) == 3
 
 
+# Verify that code without result counts as failure.
 def test_code_without_result_counts_as_failure(fake_llm, csv_file):
     llm = fake_llm("total = df['Sales'].sum()", "result = df['Sales'].sum()")
     out = run_analysis(csv_file, "What are total sales?", explain=False)
@@ -162,6 +183,7 @@ def test_code_without_result_counts_as_failure(fake_llm, csv_file):
     assert "result" in llm.calls[1][-1]["content"]
 
 
+# Verify that blank llm reply returns error.
 def test_blank_llm_reply_returns_error(fake_llm, csv_file):
     fake_llm("   ")
     out = run_analysis(csv_file, "What are total sales?", explain=False)
@@ -170,6 +192,7 @@ def test_blank_llm_reply_returns_error(fake_llm, csv_file):
     assert "RepeatedFormatError" in out["error"]
 
 
+# Verify that llm exception returns error.
 def test_llm_exception_returns_error(fake_llm, csv_file):
     fake_llm(ConnectionError("NRP is down"))
     out = run_analysis(csv_file, "What are total sales?", explain=False)
@@ -182,6 +205,8 @@ def test_llm_exception_returns_error(fake_llm, csv_file):
 # Environment adapter
 # ---------------------------------------------------------------------------
 
+
+# Verify that environment success and failure.
 def test_environment_success_and_failure():
     env = DataAnalysisEnvironment(pd.DataFrame({"Sales": [1.0, 2.0]}))
 
@@ -201,10 +226,13 @@ def test_environment_success_and_failure():
     assert "Nope" in bad["exception_info"]
     assert bad["sandbox_broken"] is False
 
+
 # ---------------------------------------------------------------------------
 # Explanation stage
 # ---------------------------------------------------------------------------
 
+
+# Verify that explanation stage.
 def test_explanation_stage(fake_llm, csv_file):
     llm = fake_llm(
         "result = df['Sales'].sum()",
@@ -227,6 +255,7 @@ def test_explanation_stage(fake_llm, csv_file):
     assert len(llm.calls) == 2
 
 
+# Verify that explanation failure preserves result.
 def test_explanation_failure_preserves_result(fake_llm, csv_file):
     fake_llm(
         "result = df['Sales'].sum()",
@@ -245,10 +274,10 @@ def test_explanation_failure_preserves_result(fake_llm, csv_file):
         "error": None,
     }
 
+
+# Verify that followup context reaches model.
 def test_followup_context_reaches_model(fake_llm, csv_file):
-    llm = fake_llm(
-        "result = df.loc[df['Region'] == 'East', 'Profit'].sum()"
-    )
+    llm = fake_llm("result = df.loc[df['Region'] == 'East', 'Profit'].sum()")
 
     context = [
         {
@@ -272,9 +301,7 @@ def test_followup_context_reaches_model(fake_llm, csv_file):
     assert result["answer"] == "40.0"
 
     prompt = "\n".join(
-        message["content"]
-        for message in llm.calls[0]
-        if message["role"] == "user"
+        message["content"] for message in llm.calls[0] if message["role"] == "user"
     )
 
     assert "BEGIN CONVERSATION" in prompt
@@ -282,6 +309,7 @@ def test_followup_context_reaches_model(fake_llm, csv_file):
     assert "How much profit did it generate?" in prompt
 
 
+# Verify that context reaches explanation model.
 def test_context_reaches_explanation_model(fake_llm, csv_file):
     llm = fake_llm(
         "result = df.loc[df['Region'] == 'East', 'Profit'].sum()",
@@ -307,10 +335,7 @@ def test_context_reaches_explanation_model(fake_llm, csv_file):
     )
 
     assert result["error"] is None
-    assert (
-        "East generated $40.00 in profit."
-        in result["answer"]
-    )
+    assert "East generated $40.00 in profit." in result["answer"]
 
     assert result["answer"] == "East generated $40.00 in profit."
     assert "**Original calculation**" not in result["answer"]
@@ -325,6 +350,7 @@ def test_context_reaches_explanation_model(fake_llm, csv_file):
     assert "40.0" in explanation_prompt
 
 
+# Verify that explanation skipped when budget is low.
 def test_explanation_skipped_when_budget_is_low(
     monkeypatch,
 ):
@@ -335,6 +361,7 @@ def test_explanation_skipped_when_budget_is_low(
         str(time.monotonic() + 7),
     )
 
+    # Simulate an unexpected model response for the test.
     def unexpected_model_call(*args, **kwargs):
         pytest.fail("Explanation model should not be called")
 
@@ -360,6 +387,7 @@ def test_explanation_skipped_when_budget_is_low(
     assert answer == "375.5"
 
 
+# Verify that explanation timeout preserves result.
 def test_explanation_timeout_preserves_result(
     monkeypatch,
 ):
@@ -368,6 +396,7 @@ def test_explanation_timeout_preserves_result(
         raising=False,
     )
 
+    # Simulate a model call that exceeds the configured time budget.
     def slow_model(*args, **kwargs):
         raise TimeoutError("Model request timed out")
 
@@ -392,10 +421,13 @@ def test_explanation_timeout_preserves_result(
 
     assert answer == "375.5"
 
+
 # ---------------------------------------------------------------------------
 # Result integrity
 # ---------------------------------------------------------------------------
 
+
+# Verify that list result skips explanation.
 def test_list_result_skips_explanation(fake_llm, csv_file):
     llm = fake_llm(
         "result = df['Region'].unique().tolist()",
@@ -417,11 +449,9 @@ def test_list_result_skips_explanation(fake_llm, csv_file):
     assert len(llm.calls) == 1
 
 
+# Verify that empty list result.
 def test_empty_list_result(fake_llm, csv_file):
-    llm = fake_llm(
-        "result = df.loc[df['Sales'] > 1000000, "
-        "'Region'].tolist()"
-    )
+    llm = fake_llm("result = df.loc[df['Sales'] > 1000000, " "'Region'].tolist()")
 
     out = run_analysis(
         csv_file,
@@ -430,12 +460,11 @@ def test_empty_list_result(fake_llm, csv_file):
     )
 
     assert out["error"] is None
-    assert out["answer"] == (
-        "No matching results were returned."
-    )
+    assert out["answer"] == ("No matching results were returned.")
     assert len(llm.calls) == 1
 
 
+# Verify that dictionary result preserves values.
 def test_dictionary_result_preserves_values(
     fake_llm,
     csv_file,
@@ -463,6 +492,7 @@ def test_dictionary_result_preserves_values(
     assert len(llm.calls) == 1
 
 
+# Verify that incorrect scalar explanation preserves value.
 def test_incorrect_scalar_explanation_preserves_value(
     fake_llm,
     csv_file,
@@ -485,6 +515,7 @@ def test_incorrect_scalar_explanation_preserves_value(
     assert "**AI interpretation**" not in out["answer"]
 
 
+# Verify that null result skips explanation.
 def test_null_result_skips_explanation(
     fake_llm,
     csv_file,
@@ -498,12 +529,11 @@ def test_null_result_skips_explanation(
     )
 
     assert out["error"] is None
-    assert out["answer"] == (
-        "The calculation did not return a value."
-    )
+    assert out["answer"] == ("The calculation did not return a value.")
     assert len(llm.calls) == 1
 
 
+# Verify that table survives incorrect explanation.
 def test_table_survives_incorrect_explanation(
     fake_llm,
     csv_file,
@@ -527,17 +557,17 @@ def test_table_survives_incorrect_explanation(
     } in out["table"]
 
 
+# Verify that empty dictionary format.
 def test_empty_dictionary_format():
     last = {
         "result": {},
         "result_type": "object",
     }
 
-    assert runner.describe_plainly(last) == (
-        "The calculation returned no values."
-    )
+    assert runner.describe_plainly(last) == ("The calculation returned no values.")
 
 
+# Verify that nested dictionary format.
 def test_nested_dictionary_format():
     last = {
         "result": {
@@ -558,6 +588,7 @@ def test_nested_dictionary_format():
     assert "5.0" in answer
 
 
+# Verify that large result is truncated.
 def test_large_result_is_truncated():
     last = {
         "result": ["x" * 1000] * 10,
@@ -569,14 +600,12 @@ def test_large_result_is_truncated():
     assert "[answer truncated]" in answer
 
 
-
+# Verify that list result has no unnecessary quotes.
 def test_list_result_has_no_unnecessary_quotes(
     fake_llm,
     csv_file,
 ):
-    llm = fake_llm(
-        "result = df['Region'].unique().tolist()"
-    )
+    llm = fake_llm("result = df['Region'].unique().tolist()")
 
     out = run_analysis(
         csv_file,
@@ -590,6 +619,7 @@ def test_list_result_has_no_unnecessary_quotes(
     assert len(llm.calls) == 1
 
 
+# Verify that nested records become supporting table.
 def test_nested_records_become_supporting_table(
     fake_llm,
     csv_file,
@@ -622,6 +652,7 @@ def test_nested_records_become_supporting_table(
     assert len(llm.calls) == 1
 
 
+# Verify that list of records becomes table.
 def test_list_of_records_becomes_table(
     fake_llm,
     csv_file,
@@ -642,6 +673,7 @@ def test_list_of_records_becomes_table(
     assert len(llm.calls) == 1
 
 
+# Verify that named dictionary formats money.
 def test_named_dictionary_formats_money():
     last = {
         "result": {
@@ -657,6 +689,7 @@ def test_named_dictionary_formats_money():
     assert "-$100.25" in answer
 
 
+# Verify that named dictionary formats percentages.
 def test_named_dictionary_formats_percentages():
     last = {
         "result": {
@@ -671,6 +704,7 @@ def test_named_dictionary_formats_percentages():
     assert "50.00%" not in answer
 
 
+# Verify that structured result preserves correlation.
 def test_structured_result_preserves_correlation():
     from agent.result_formatter import (
         describe_record_table,
@@ -698,6 +732,7 @@ def test_structured_result_preserves_correlation():
     assert "Correlation does not establish causation." in answer
 
 
+# Verify that multiple tables are not silently discarded.
 def test_multiple_tables_are_not_silently_discarded():
     from agent.result_formatter import extract_record_table
 
@@ -712,6 +747,7 @@ def test_multiple_tables_are_not_silently_discarded():
     assert table is None
 
 
+# Verify that inconsistent record columns are rejected.
 def test_inconsistent_record_columns_are_rejected():
     from agent.result_formatter import extract_record_table
 
@@ -726,16 +762,14 @@ def test_inconsistent_record_columns_are_rejected():
     assert table is None
 
 
+# Verify that structured table row limit.
 def test_structured_table_row_limit():
     from agent.result_formatter import (
         extract_record_table,
         describe_record_table,
     )
 
-    value = [
-        {"Region": str(index), "Sales": index}
-        for index in range(250)
-    ]
+    value = [{"Region": str(index), "Sales": index} for index in range(250)]
 
     name, table = extract_record_table(value)
 
@@ -750,7 +784,7 @@ def test_structured_table_row_limit():
     assert "Showing 200 of 250" in answer
 
 
-
+# Verify that correlation table direct answer.
 def test_correlation_table_direct_answer():
     last = {
         "result": [
@@ -768,12 +802,11 @@ def test_correlation_table_direct_answer():
     assert "Correlation does not establish causation." in answer
 
 
+# Verify that correlation explanation adds disclaimer.
 def test_correlation_explanation_adds_disclaimer(
     fake_llm,
 ):
-    fake_llm(
-        "Discount and profit have a negative association."
-    )
+    fake_llm("Discount and profit have a negative association.")
 
     last = {
         "result": [
@@ -795,6 +828,7 @@ def test_correlation_explanation_adds_disclaimer(
     assert "Correlation does not establish causation." in answer
 
 
+# Verify that correlation disclaimer not duplicated.
 def test_correlation_disclaimer_not_duplicated(
     fake_llm,
 ):
@@ -818,17 +852,14 @@ def test_correlation_disclaimer_not_duplicated(
         runner.describe_plainly(last),
     )
 
-    assert answer.count(
-        "Correlation does not establish causation."
-    ) == 1
+    assert answer.count("Correlation does not establish causation.") == 1
 
 
+# Verify that correlation explanation failure preserves disclaimer.
 def test_correlation_explanation_failure_preserves_disclaimer(
     fake_llm,
 ):
-    fake_llm(
-        TimeoutError("Explanation timed out")
-    )
+    fake_llm(TimeoutError("Explanation timed out"))
 
     last = {
         "result": [
@@ -851,6 +882,7 @@ def test_correlation_explanation_failure_preserves_disclaimer(
     assert "Correlation does not establish causation." in answer
 
 
+# Verify that non correlation table has no disclaimer.
 def test_non_correlation_table_has_no_disclaimer():
     last = {
         "result": [
@@ -868,7 +900,7 @@ def test_non_correlation_table_has_no_disclaimer():
     assert "causation" not in answer.lower()
 
 
-
+# Verify that single group financial summary.
 def test_single_group_financial_summary():
     from agent.result_formatter import (
         summarize_financial_table,
@@ -895,6 +927,7 @@ def test_single_group_financial_summary():
     assert "negative total profit" in answer
 
 
+# Verify that discount relationship summary.
 def test_discount_relationship_summary():
     from agent.result_formatter import (
         summarize_financial_table,
@@ -923,12 +956,10 @@ def test_discount_relationship_summary():
     assert "5.00%" in answer
     assert "-0.6500" in answer
     assert "negative association" in answer
-    assert (
-        "Correlation does not establish causation."
-        in answer
-    )
+    assert "Correlation does not establish causation." in answer
 
 
+# Verify that average discount summary.
 def test_average_discount_summary():
     from agent.result_formatter import (
         summarize_financial_table,
@@ -954,6 +985,7 @@ def test_average_discount_summary():
     assert "18.25%" in answer
 
 
+# Verify that average discount summary preserves ties.
 def test_average_discount_summary_preserves_ties():
     from agent.result_formatter import (
         summarize_financial_table,
@@ -983,6 +1015,7 @@ def test_average_discount_summary_preserves_ties():
     assert "20.00%" in answer
 
 
+# Verify that equal average discount summary.
 def test_equal_average_discount_summary():
     from agent.result_formatter import (
         summarize_financial_table,
@@ -1006,6 +1039,7 @@ def test_equal_average_discount_summary():
     assert "15.00%" in answer
 
 
+# Verify that unsupported financial summary.
 @pytest.mark.parametrize(
     "records",
     [
@@ -1042,6 +1076,7 @@ def test_unsupported_financial_summary(records):
     assert summarize_financial_table(records) is None
 
 
+# Verify that financial summary does not modify records.
 def test_financial_summary_does_not_modify_records():
     from copy import deepcopy
 
@@ -1064,6 +1099,7 @@ def test_financial_summary_does_not_modify_records():
     assert records == original
 
 
+# Verify that financial summary escapes group labels.
 def test_financial_summary_escapes_group_labels():
     from agent.result_formatter import (
         summarize_financial_table,
@@ -1082,6 +1118,7 @@ def test_financial_summary_escapes_group_labels():
     assert r"\*Product A\*" in answer
 
 
+# Verify that single group financial result skips llm.
 def test_single_group_financial_result_skips_llm(
     fake_llm,
     csv_file,
@@ -1108,6 +1145,7 @@ def test_single_group_financial_result_skips_llm(
     assert len(llm.calls) == 1
 
 
+# Verify that discount summary skips second llm request.
 def test_discount_summary_skips_second_llm_request(
     fake_llm,
     csv_file,
@@ -1132,13 +1170,11 @@ def test_discount_summary_skips_second_llm_request(
 
     assert out["error"] is None
     assert len(out["table"]) == 3
-    assert (
-        "Correlation does not establish causation."
-        in out["answer"]
-    )
+    assert "Correlation does not establish causation." in out["answer"]
     assert len(llm.calls) == 1
 
 
+# Verify that recommendation retains explanation route.
 def test_recommendation_retains_explanation_route(
     fake_llm,
     csv_file,
@@ -1162,7 +1198,7 @@ def test_recommendation_retains_explanation_route(
     assert "Investigate opportunities" in out["answer"]
 
 
-
+# Verify that financial sales threshold skips llm.
 def test_financial_sales_threshold_skips_llm(
     fake_llm,
     csv_file,
@@ -1190,6 +1226,7 @@ def test_financial_sales_threshold_skips_llm(
     ]
 
 
+# Verify that financial margin threshold skips llm.
 def test_financial_margin_threshold_skips_llm(
     fake_llm,
     csv_file,
@@ -1208,12 +1245,10 @@ def test_financial_margin_threshold_skips_llm(
     assert len(result["table"]) == 1
     assert result["table"][0]["Region"] == "West"
 
-    assert (
-        result["table"][0]["Profit_Margin_Pct"]
-        == 3.33
-    )
+    assert result["table"][0]["Profit_Margin_Pct"] == 3.33
 
 
+# Verify that financial route preserves explain false.
 def test_financial_route_preserves_explain_false(
     fake_llm,
     csv_file,
@@ -1231,23 +1266,23 @@ def test_financial_route_preserves_explain_false(
     assert len(llm.calls) == 1
 
 
-
+# Verify that discount relationship uses zero llm requests.
 def test_discount_relationship_uses_zero_llm_requests(
     fake_llm,
     tmp_path,
 ):
-    llm = fake_llm(
-        AssertionError("LLM should not be called")
-    )
+    llm = fake_llm(AssertionError("LLM should not be called"))
 
     path = tmp_path / "discount_orders.csv"
 
-    pd.DataFrame({
-        "Category": ["Alpha", "Alpha", "Beta", "Beta"],
-        "Sales": [100, 200, 300, 400],
-        "Profit": [30, -10, 20, 60],
-        "Discount": [0.1, 0.3, 0.05, 0.15],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Category": ["Alpha", "Alpha", "Beta", "Beta"],
+            "Sales": [100, 200, 300, 400],
+            "Profit": [30, -10, 20, 60],
+            "Discount": [0.1, 0.3, 0.05, 0.15],
+        }
+    ).to_csv(path, index=False)
 
     result = run_analysis(
         str(path),
@@ -1260,25 +1295,24 @@ def test_discount_relationship_uses_zero_llm_requests(
     assert len(result["table"]) == 2
     assert llm.calls == []
 
-    assert "Correlation does not establish causation" in (
-        result["answer"]
-    )
+    assert "Correlation does not establish causation" in (result["answer"])
 
 
+# Verify that average discount uses zero llm requests.
 def test_average_discount_uses_zero_llm_requests(
     fake_llm,
     tmp_path,
 ):
-    llm = fake_llm(
-        AssertionError("LLM should not be called")
-    )
+    llm = fake_llm(AssertionError("LLM should not be called"))
 
     path = tmp_path / "discount_orders.csv"
 
-    pd.DataFrame({
-        "Region": ["North", "North", "South"],
-        "Discount": [0.1, 0.3, 0.4],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Region": ["North", "North", "South"],
+            "Discount": [0.1, 0.3, 0.4],
+        }
+    ).to_csv(path, index=False)
 
     result = run_analysis(
         str(path),
@@ -1291,8 +1325,7 @@ def test_average_discount_uses_zero_llm_requests(
     assert llm.calls == []
 
 
-
-
+# Verify that single row summary preserves calculated values.
 def test_single_row_summary_preserves_calculated_values():
     from agent.result_formatter import summarize_single_row
 
@@ -1314,6 +1347,7 @@ def test_single_row_summary_preserves_calculated_values():
     assert "row(s)" not in answer
 
 
+# Verify that single row summary preserves correlation warning.
 def test_single_row_summary_preserves_correlation_warning():
     from agent.result_formatter import summarize_single_row
 
@@ -1331,6 +1365,7 @@ def test_single_row_summary_preserves_correlation_warning():
     assert "Correlation does not establish causation." in answer
 
 
+# Verify that single row summary rejects multiple rows.
 def test_single_row_summary_rejects_multiple_rows():
     from agent.result_formatter import summarize_single_row
 
@@ -1342,6 +1377,7 @@ def test_single_row_summary_rejects_multiple_rows():
     assert summarize_single_row(records) is None
 
 
+# Verify that single row explanation failure preserves values.
 def test_single_row_explanation_failure_preserves_values(
     fake_llm,
     csv_file,
@@ -1366,7 +1402,7 @@ def test_single_row_explanation_failure_preserves_values(
     assert out["table"][0]["Cost_Per_Conversion"] == 6.25
 
 
-
+# Verify that single metric explanation validation.
 @pytest.mark.parametrize(
     "value, explanation, expected",
     [
@@ -1377,8 +1413,7 @@ def test_single_row_explanation_failure_preserves_values(
         ),
         (
             {"Net_Income_Increase_Pct": 50},
-            "Net income increased by **50%** "
-            "from January to March.",
+            "Net income increased by **50%** " "from January to March.",
             True,
         ),
         (
@@ -1418,8 +1453,6 @@ def test_single_row_explanation_failure_preserves_values(
         ),
     ],
 )
-
-
 def test_single_metric_explanation_validation(
     value,
     explanation,
@@ -1429,26 +1462,29 @@ def test_single_metric_explanation_validation(
         validate_single_metric_explanation,
     )
 
-    assert validate_single_metric_explanation(
-        explanation,
-        value,
-    ) is expected
+    assert (
+        validate_single_metric_explanation(
+            explanation,
+            value,
+        )
+        is expected
+    )
 
 
+# Verify that single metric natural fallback.
 def test_single_metric_natural_fallback():
     from agent.result_formatter import (
         summarize_single_metric,
     )
 
-    answer = summarize_single_metric(
-        {"ROI_Pct": 500}
-    )
+    answer = summarize_single_metric({"ROI_Pct": 500})
 
     assert "500.00%" in answer
     assert answer.endswith(".")
     assert "Calculated values" not in answer
 
 
+# Verify that named percentage explanation accepted.
 def test_named_percentage_explanation_accepted(
     fake_llm,
     csv_file,
@@ -1471,6 +1507,7 @@ def test_named_percentage_explanation_accepted(
     assert "Original calculation" not in out["answer"]
 
 
+# Verify that context excludes unlabeled markdown table.
 def test_context_excludes_unlabeled_markdown_table():
     from agent.conversation_context import (
         build_conversation_context,
@@ -1496,27 +1533,25 @@ def test_context_excludes_unlabeled_markdown_table():
 
     assert len(context) == 2
 
-    assert context[1]["content"] == (
-        "Revenue by department."
-    )
+    assert context[1]["content"] == ("Revenue by department.")
 
 
-
+# Verify that business schema reaches analysis model.
 def test_business_schema_reaches_analysis_model(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "marketing.csv"
 
-    pd.DataFrame({
-        "Campaign": ["Email", "Search"],
-        "Advertising_Spend": [500, 1000],
-        "Generated_Revenue": [3000, 4000],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Campaign": ["Email", "Search"],
+            "Advertising_Spend": [500, 1000],
+            "Generated_Revenue": [3000, 4000],
+        }
+    ).to_csv(path, index=False)
 
-    llm = fake_llm(
-        "result = df['Generated_Revenue'].sum()"
-    )
+    llm = fake_llm("result = df['Generated_Revenue'].sum()")
 
     result = run_analysis(
         str(path),
@@ -1528,9 +1563,7 @@ def test_business_schema_reaches_analysis_model(
     assert result["answer"] == "7000"
 
     prompt = "\n".join(
-        message["content"]
-        for message in llm.calls[0]
-        if message["role"] == "user"
+        message["content"] for message in llm.calls[0] if message["role"] == "user"
     )
 
     assert "Business schema hints" in prompt
@@ -1541,20 +1574,22 @@ def test_business_schema_reaches_analysis_model(
     assert len(llm.calls) == 1
 
 
+# Verify that ambiguous schema reaches analysis model.
 def test_ambiguous_schema_reaches_analysis_model(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "ambiguous.csv"
 
-    pd.DataFrame({
-        "Sales": [1000],
-        "Revenue": [1200],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Sales": [1000],
+            "Revenue": [1200],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm(
-        "result = 'Cannot answer: clarify whether "
-        "Sales or Revenue should be used.'"
+        "result = 'Cannot answer: clarify whether " "Sales or Revenue should be used.'"
     )
 
     result = run_analysis(
@@ -1566,15 +1601,14 @@ def test_ambiguous_schema_reaches_analysis_model(
     assert result["error"] is None
 
     prompt = "\n".join(
-        message["content"]
-        for message in llm.calls[0]
-        if message["role"] == "user"
+        message["content"] for message in llm.calls[0] if message["role"] == "user"
     )
 
     assert "revenue: Sales, Revenue" in prompt
     assert "AMBIGUOUS" in prompt
 
 
+# Verify that schema failure preserves analysis.
 def test_schema_failure_preserves_analysis(
     fake_llm,
     csv_file,
@@ -1582,10 +1616,9 @@ def test_schema_failure_preserves_analysis(
 ):
     import agent.dataset_schema as schema_module
 
+    # Simulate a failed dataset profile for error-handling tests.
     def failed_profile(*args, **kwargs):
-        raise RuntimeError(
-            "Simulated profiling failure"
-        )
+        raise RuntimeError("Simulated profiling failure")
 
     monkeypatch.setattr(
         schema_module,
@@ -1593,9 +1626,7 @@ def test_schema_failure_preserves_analysis(
         failed_profile,
     )
 
-    llm = fake_llm(
-        "result = df['Sales'].sum()"
-    )
+    llm = fake_llm("result = df['Sales'].sum()")
 
     result = run_analysis(
         csv_file,
@@ -1607,15 +1638,14 @@ def test_schema_failure_preserves_analysis(
     assert result["answer"] == "375.5"
 
     prompt = "\n".join(
-        message["content"]
-        for message in llm.calls[0]
-        if message["role"] == "user"
+        message["content"] for message in llm.calls[0] if message["role"] == "user"
     )
 
     assert "Sales" in prompt
     assert "Business schema hints" not in prompt
 
 
+# Verify that schema profile runs once per analysis.
 def test_schema_profile_runs_once_per_analysis(
     fake_llm,
     csv_file,
@@ -1626,6 +1656,7 @@ def test_schema_profile_runs_once_per_analysis(
     original = schema_module.profile_dataset
     calls = []
 
+    # Record dataset-profile calls and return the test profile.
     def tracked_profile(dataframe):
         calls.append(1)
 
@@ -1655,19 +1686,20 @@ def test_schema_profile_runs_once_per_analysis(
     assert len(llm.calls) == 2
 
 
+# Verify that invalid revenue is blocked before model.
 def test_invalid_revenue_is_blocked_before_model(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "quality.csv"
 
-    pd.DataFrame({
-        "Revenue": ["1000", "unknown", "2000"],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Revenue": ["1000", "unknown", "2000"],
+        }
+    ).to_csv(path, index=False)
 
-    llm = fake_llm(
-        "result = 3000"
-    )
+    llm = fake_llm("result = 3000")
 
     result = run_analysis(
         str(path),
@@ -1683,18 +1715,22 @@ def test_invalid_revenue_is_blocked_before_model(
 
     assert llm.calls == []
 
+
+# Verify that formatted numeric text analysis.
 def test_formatted_numeric_text_analysis(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "formatted_revenue.csv"
 
-    pd.DataFrame({
-        "Revenue_USD": [
-            "$1,000",
-            "$2,000",
-        ],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Revenue_USD": [
+                "$1,000",
+                "$2,000",
+            ],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm(
         "values = df['Revenue_USD'].str.replace("
@@ -1713,31 +1749,30 @@ def test_formatted_numeric_text_analysis(
     assert result["answer"] == "3000.0"
 
     prompt = "\n".join(
-        message["content"]
-        for message in llm.calls[0]
-        if message["role"] == "user"
+        message["content"] for message in llm.calls[0] if message["role"] == "user"
     )
 
     assert "formatted_numeric_text" in prompt
 
 
+# Verify that unrelated date ambiguity does not block analysis.
 def test_unrelated_date_ambiguity_does_not_block_analysis(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "ambiguous_dates.csv"
 
-    pd.DataFrame({
-        "Order_Date": [
-            "01/02/2026",
-            "03/04/2026",
-        ],
-        "Revenue": [1000, 2000],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Order_Date": [
+                "01/02/2026",
+                "03/04/2026",
+            ],
+            "Revenue": [1000, 2000],
+        }
+    ).to_csv(path, index=False)
 
-    llm = fake_llm(
-        "result = float(df['Revenue'].sum())"
-    )
+    llm = fake_llm("result = float(df['Revenue'].sum())")
 
     result = run_analysis(
         str(path),
@@ -1749,28 +1784,28 @@ def test_unrelated_date_ambiguity_does_not_block_analysis(
     assert result["answer"] == "3000.0"
 
     prompt = "\n".join(
-        message["content"]
-        for message in llm.calls[0]
-        if message["role"] == "user"
+        message["content"] for message in llm.calls[0] if message["role"] == "user"
     )
 
     assert "ambiguous_date_convention" in prompt
 
 
-
+# Verify that ambiguous dates block model generation.
 def test_ambiguous_dates_block_model_generation(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "ambiguous_dates.csv"
 
-    pd.DataFrame({
-        "Order_Date": [
-            "01/02/2026",
-            "03/04/2026",
-        ],
-        "Revenue": [1000, 2000],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Order_Date": [
+                "01/02/2026",
+                "03/04/2026",
+            ],
+            "Revenue": [1000, 2000],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm("result = 3000")
 
@@ -1789,15 +1824,18 @@ def test_ambiguous_dates_block_model_generation(
     assert llm.calls == []
 
 
+# Verify that mixed discount scale blocks model generation.
 def test_mixed_discount_scale_blocks_model_generation(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "mixed_discounts.csv"
 
-    pd.DataFrame({
-        "Discount": [0.15, 20, 0.10, 30],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Discount": [0.15, 20, 0.10, 30],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm("result = 18.75")
 
@@ -1815,20 +1853,21 @@ def test_mixed_discount_scale_blocks_model_generation(
     assert llm.calls == []
 
 
+# Verify that invalid revenue does not block quantity.
 def test_invalid_revenue_does_not_block_quantity(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "invalid_revenue.csv"
 
-    pd.DataFrame({
-        "Revenue": ["1000", "unknown", "2000"],
-        "Quantity": [10, 20, 30],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Revenue": ["1000", "unknown", "2000"],
+            "Quantity": [10, 20, 30],
+        }
+    ).to_csv(path, index=False)
 
-    llm = fake_llm(
-        "result = int(df['Quantity'].sum())"
-    )
+    llm = fake_llm("result = int(df['Quantity'].sum())")
 
     result = run_analysis(
         str(path),
@@ -1842,15 +1881,18 @@ def test_invalid_revenue_does_not_block_quantity(
     assert len(llm.calls) == 1
 
 
+# Verify that quality hints reach model for explicit exclusions.
 def test_quality_hints_reach_model_for_explicit_exclusions(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "partial_revenue.csv"
 
-    pd.DataFrame({
-        "Revenue": ["1000", "unknown", "2000"],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Revenue": ["1000", "unknown", "2000"],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm(
         "values = pd.to_numeric("
@@ -1872,9 +1914,7 @@ def test_quality_hints_reach_model_for_explicit_exclusions(
     assert len(llm.calls) == 1
 
     prompt = "\n".join(
-        message["content"]
-        for message in llm.calls[0]
-        if message["role"] == "user"
+        message["content"] for message in llm.calls[0] if message["role"] == "user"
     )
 
     assert "partially_numeric_text" in prompt
@@ -1882,30 +1922,19 @@ def test_quality_hints_reach_model_for_explicit_exclusions(
     assert "3000" in result["answer"]
 
 
-
 # --------------------------------------------------
 # Multi-metric result integrity
 # --------------------------------------------------
 
+
+# Verify that multi metric result integrity.
 @pytest.mark.parametrize(
     "explanation",
     [
-        (
-            "The total valid revenue is "
-            "$375.50, excluding 0 rows."
-        ),
-        (
-            "The total valid revenue is "
-            "$900.00, excluding 0 rows."
-        ),
-        (
-            "The total valid revenue is "
-            "$375.50, excluding 5 rows."
-        ),
-        (
-            "The total valid revenue is "
-            "€375.50, excluding 0 rows."
-        ),
+        ("The total valid revenue is " "$375.50, excluding 0 rows."),
+        ("The total valid revenue is " "$900.00, excluding 0 rows."),
+        ("The total valid revenue is " "$375.50, excluding 5 rows."),
+        ("The total valid revenue is " "€375.50, excluding 0 rows."),
     ],
 )
 def test_multi_metric_result_integrity(
@@ -1933,14 +1962,12 @@ def test_multi_metric_result_integrity(
 
     answer = out["answer"].replace("**", "")
 
-    assert answer == (
-        "The total valid revenue is "
-        "$375.50, excluding 0 rows."
-    )
+    assert answer == ("The total valid revenue is " "$375.50, excluding 0 rows.")
 
     assert len(llm.calls) == 1
 
 
+# Verify that multi metric explanation failure.
 def test_multi_metric_explanation_failure(
     fake_llm,
     csv_file,
@@ -1963,26 +1990,27 @@ def test_multi_metric_explanation_failure(
     assert out["error"] is None
 
     assert out["answer"] == (
-        "The total valid revenue is "
-        "**$375.50**, excluding **0 rows**."
+        "The total valid revenue is " "**$375.50**, excluding **0 rows**."
     )
 
     assert len(llm.calls) == 2
 
 
+# Verify that explicit eur explanation validation.
 def test_explicit_eur_explanation_validation(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "euro_revenue.csv"
 
-    pd.DataFrame({
-        "Revenue_EUR": [3000, 5000],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Revenue_EUR": [3000, 5000],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm(
-        "result = {'Total_Revenue_EUR': "
-        "float(df['Revenue_EUR'].sum())}",
+        "result = {'Total_Revenue_EUR': " "float(df['Revenue_EUR'].sum())}",
         "The total revenue is €8,000.00.",
     )
 
@@ -1995,18 +2023,17 @@ def test_explicit_eur_explanation_validation(
     assert out["error"] is None
     assert out["table"] is None
 
-    assert out["answer"] == (
-        "The total revenue is €8,000.00."
-    )
+    assert out["answer"] == ("The total revenue is €8,000.00.")
 
     assert len(llm.calls) == 2
-
 
 
 # --------------------------------------------------
 # Numerical precision and explanation optimization
 # --------------------------------------------------
 
+
+# Verify that named currency skips explanation.
 @pytest.mark.parametrize(
     "currency, expected",
     [
@@ -2027,13 +2054,14 @@ def test_named_currency_skips_explanation(
 
     path = tmp_path / "currency_precision.csv"
 
-    pd.DataFrame({
-        column: [100.1234, 275.4444],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            column: [100.1234, 275.4444],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm(
-        f"result = {{'Total_Revenue_{currency}': "
-        f"float(df['{column}'].sum())}}",
+        f"result = {{'Total_Revenue_{currency}': " f"float(df['{column}'].sum())}}",
     )
 
     out = run_analysis(
@@ -2049,19 +2077,21 @@ def test_named_currency_skips_explanation(
     assert len(llm.calls) == 1
 
 
+# Verify that negative monetary precision.
 def test_negative_monetary_precision(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "negative_profit.csv"
 
-    pd.DataFrame({
-        "Net_Profit_USD": [-100.1234, -25.4444],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Net_Profit_USD": [-100.1234, -25.4444],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm(
-        "result = {'Total_Net_Profit_USD': "
-        "float(df['Net_Profit_USD'].sum())}",
+        "result = {'Total_Net_Profit_USD': " "float(df['Net_Profit_USD'].sum())}",
     )
 
     out = run_analysis(
@@ -2075,6 +2105,7 @@ def test_negative_monetary_precision(
     assert len(llm.calls) == 1
 
 
+# Verify that named percentage skips explanation.
 def test_named_percentage_skips_explanation(
     fake_llm,
     csv_file,
@@ -2096,6 +2127,7 @@ def test_named_percentage_skips_explanation(
     assert len(llm.calls) == 1
 
 
+# Verify that multiple named metrics skip explanation.
 def test_multiple_named_metrics_skip_explanation(
     fake_llm,
     csv_file,
@@ -2125,19 +2157,21 @@ def test_multiple_named_metrics_skip_explanation(
     assert len(llm.calls) == 1
 
 
+# Verify that extended interpretation retains model.
 def test_extended_interpretation_retains_model(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "revenue.csv"
 
-    pd.DataFrame({
-        "Revenue_EUR": [1000, 2000],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Revenue_EUR": [1000, 2000],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm(
-        "result = {'Total_Revenue_EUR': "
-        "float(df['Revenue_EUR'].sum())}",
+        "result = {'Total_Revenue_EUR': " "float(df['Revenue_EUR'].sum())}",
         "The total revenue is €3,000.00.",
     )
 
@@ -2149,13 +2183,12 @@ def test_extended_interpretation_retains_model(
 
     assert out["error"] is None
 
-    assert out["answer"] == (
-        "The total revenue is €3,000.00."
-    )
+    assert out["answer"] == ("The total revenue is €3,000.00.")
 
     assert len(llm.calls) == 2
 
 
+# Verify that unsupported scalar retains explanation.
 def test_unsupported_scalar_retains_explanation(
     fake_llm,
     csv_file,
@@ -2172,13 +2205,12 @@ def test_unsupported_scalar_retains_explanation(
     )
 
     assert out["error"] is None
-    assert out["answer"] == (
-        "The total sales are $375.50."
-    )
+    assert out["answer"] == ("The total sales are $375.50.")
 
     assert len(llm.calls) == 2
 
 
+# Verify that precision instructions reach model.
 def test_precision_instructions_reach_model(
     fake_llm,
     csv_file,
@@ -2196,9 +2228,7 @@ def test_precision_instructions_reach_model(
     assert out["error"] is None
 
     system_prompt = "\n".join(
-        message["content"]
-        for message in llm.calls[0]
-        if message["role"] == "system"
+        message["content"] for message in llm.calls[0] if message["role"] == "system"
     )
 
     assert "Never use int()" in system_prompt
@@ -2206,12 +2236,12 @@ def test_precision_instructions_reach_model(
     assert "Do not add a USD suffix" in system_prompt
 
 
-
 # --------------------------------------------------
 # Scalar correlation integration
 # --------------------------------------------------
 
 
+# Verify that scalar correlation skips explanation.
 @pytest.mark.parametrize(
     "method",
     [
@@ -2227,10 +2257,12 @@ def test_scalar_correlation_skips_explanation(
 ):
     path = tmp_path / "correlation.csv"
 
-    pd.DataFrame({
-        "Metric_A": [1, 2, 3, 4],
-        "Metric_B": [2, 4, 6, 8],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Metric_A": [1, 2, 3, 4],
+            "Metric_B": [2, 4, 6, 8],
+        }
+    ).to_csv(path, index=False)
 
     llm = fake_llm(
         "result = safe_correlation("
@@ -2240,8 +2272,7 @@ def test_scalar_correlation_skips_explanation(
 
     out = run_analysis(
         str(path),
-        f"Calculate the {method} correlation "
-        "between Metric_A and Metric_B.",
+        f"Calculate the {method} correlation " "between Metric_A and Metric_B.",
         explain=True,
     )
 
@@ -2257,26 +2288,25 @@ def test_scalar_correlation_skips_explanation(
     assert len(llm.calls) == 1
 
 
+# Verify that scalar negative correlation.
 def test_scalar_negative_correlation(
     fake_llm,
     tmp_path,
 ):
     path = tmp_path / "negative_correlation.csv"
 
-    pd.DataFrame({
-        "Metric_A": [1, 2, 3, 4],
-        "Metric_B": [8, 6, 4, 2],
-    }).to_csv(path, index=False)
+    pd.DataFrame(
+        {
+            "Metric_A": [1, 2, 3, 4],
+            "Metric_B": [8, 6, 4, 2],
+        }
+    ).to_csv(path, index=False)
 
-    llm = fake_llm(
-        "result = float("
-        "df['Metric_A'].corr(df['Metric_B']))"
-    )
+    llm = fake_llm("result = float(" "df['Metric_A'].corr(df['Metric_B']))")
 
     out = run_analysis(
         str(path),
-        "Calculate the Pearson correlation "
-        "between Metric_A and Metric_B.",
+        "Calculate the Pearson correlation " "between Metric_A and Metric_B.",
         explain=True,
     )
 
@@ -2292,6 +2322,7 @@ def test_scalar_negative_correlation(
     assert len(llm.calls) == 1
 
 
+# Verify that scalar correlation benchmark precision.
 def test_scalar_correlation_benchmark_precision(
     fake_llm,
     csv_file,
@@ -2302,8 +2333,7 @@ def test_scalar_correlation_benchmark_precision(
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit.",
+        "Calculate the Pearson correlation " "between Sales and Profit.",
         explain=True,
     )
 
@@ -2319,6 +2349,7 @@ def test_scalar_correlation_benchmark_precision(
     assert len(llm.calls) == 1
 
 
+# Verify that scalar correlation extended fallback.
 def test_scalar_correlation_extended_fallback(
     fake_llm,
     csv_file,
@@ -2330,8 +2361,7 @@ def test_scalar_correlation_extended_fallback(
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit and explain it.",
+        "Calculate the Pearson correlation " "between Sales and Profit and explain it.",
         explain=True,
     )
 
@@ -2339,18 +2369,15 @@ def test_scalar_correlation_extended_fallback(
     assert out["table"] is None
 
     assert "**0.0490**" in out["answer"]
-    assert "very weak positive linear association" in (
-        out["answer"]
-    )
+    assert "very weak positive linear association" in (out["answer"])
 
-    assert (
-        "Correlation does not establish causation."
-        in out["answer"]
-    )
+    assert "Correlation does not establish causation." in out["answer"]
 
     # The explanation model is no longer required.
     assert len(llm.calls) == 1
 
+
+# Verify that scalar correlation rejects wrong explanation.
 def test_scalar_correlation_rejects_wrong_explanation(
     fake_llm,
     csv_file,
@@ -2362,8 +2389,7 @@ def test_scalar_correlation_rejects_wrong_explanation(
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit and explain it.",
+        "Calculate the Pearson correlation " "between Sales and Profit and explain it.",
         explain=True,
     )
 
@@ -2371,15 +2397,13 @@ def test_scalar_correlation_rejects_wrong_explanation(
     assert "**0.0490**" in out["answer"]
     assert "0.9." not in out["answer"]
 
-    assert (
-        "Correlation does not establish causation."
-        in out["answer"]
-    )
+    assert "Correlation does not establish causation." in out["answer"]
 
     # Incorrect generated explanations are avoided entirely.
     assert len(llm.calls) == 1
 
 
+# Verify that valid scalar explanation retains disclaimer.
 def test_valid_scalar_explanation_retains_disclaimer(
     fake_llm,
     csv_file,
@@ -2391,25 +2415,21 @@ def test_valid_scalar_explanation_retains_disclaimer(
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit and explain it.",
+        "Calculate the Pearson correlation " "between Sales and Profit and explain it.",
         explain=True,
     )
 
     assert out["error"] is None
     assert "**0.5000**" in out["answer"]
 
-    assert "strong positive linear association" in (
-        out["answer"]
-    )
+    assert "strong positive linear association" in (out["answer"])
 
-    assert out["answer"].count(
-        "Correlation does not establish causation."
-    ) == 1
+    assert out["answer"].count("Correlation does not establish causation.") == 1
 
     assert len(llm.calls) == 1
 
 
+# Verify that unrelated small scalar retains explanation.
 def test_unrelated_small_scalar_retains_explanation(
     fake_llm,
     csv_file,
@@ -2427,18 +2447,14 @@ def test_unrelated_small_scalar_retains_explanation(
 
     assert out["error"] is None
 
-    assert out["answer"] == (
-        "The calculated ratio is 0.5."
-    )
+    assert out["answer"] == ("The calculated ratio is 0.5.")
 
-    assert (
-        "Correlation does not establish causation."
-        not in out["answer"]
-    )
+    assert "Correlation does not establish causation." not in out["answer"]
 
     assert len(llm.calls) == 2
 
 
+# Verify that scalar correlation explain false unchanged.
 def test_scalar_correlation_explain_false_unchanged(
     fake_llm,
     csv_file,
@@ -2449,8 +2465,7 @@ def test_scalar_correlation_explain_false_unchanged(
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit.",
+        "Calculate the Pearson correlation " "between Sales and Profit.",
         explain=False,
     )
 
@@ -2467,6 +2482,8 @@ def test_scalar_correlation_explain_false_unchanged(
 # Statistical explanation integrity integration
 # --------------------------------------------------
 
+
+# Verify that mixed correlation result discards narrative.
 def test_mixed_correlation_result_discards_narrative(
     fake_llm,
     csv_file,
@@ -2482,8 +2499,7 @@ def test_mixed_correlation_result_discards_narrative(
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit and explain it.",
+        "Calculate the Pearson correlation " "between Sales and Profit and explain it.",
         explain=True,
     )
 
@@ -2492,46 +2508,37 @@ def test_mixed_correlation_result_discards_narrative(
 
     assert "**0.0490**" in out["answer"]
 
-    assert "very weak positive linear association" in (
-        out["answer"]
-    )
+    assert "very weak positive linear association" in (out["answer"])
 
     assert "causes higher profit" not in out["answer"]
 
-    assert out["answer"].count(
-        "Correlation does not establish causation."
-    ) == 1
+    assert out["answer"].count("Correlation does not establish causation.") == 1
 
     assert len(llm.calls) == 1
 
 
+# Verify that named correlation extended interpretation.
 def test_named_correlation_extended_interpretation(
     fake_llm,
     csv_file,
 ):
-    llm = fake_llm(
-        "result = {"
-        "'Sales_Profit_Pearson_Correlation': -0.45"
-        "}"
-    )
+    llm = fake_llm("result = {" "'Sales_Profit_Pearson_Correlation': -0.45" "}")
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit and explain it.",
+        "Calculate the Pearson correlation " "between Sales and Profit and explain it.",
         explain=True,
     )
 
     assert out["error"] is None
     assert "**-0.4500**" in out["answer"]
 
-    assert "moderate negative linear association" in (
-        out["answer"]
-    )
+    assert "moderate negative linear association" in (out["answer"])
 
     assert len(llm.calls) == 1
 
 
+# Verify that mixed correlation simple question.
 def test_mixed_correlation_simple_question(
     fake_llm,
     csv_file,
@@ -2545,8 +2552,7 @@ def test_mixed_correlation_simple_question(
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit.",
+        "Calculate the Pearson correlation " "between Sales and Profit.",
         explain=True,
     )
 
@@ -2561,6 +2567,7 @@ def test_mixed_correlation_simple_question(
     assert len(llm.calls) == 1
 
 
+# Verify that extended correlation method interpretation.
 @pytest.mark.parametrize(
     "method, association",
     [
@@ -2591,29 +2598,21 @@ def test_extended_correlation_method_interpretation(
     assert out["error"] is None
     assert association in out["answer"]
 
-    assert (
-        "Correlation does not establish causation."
-        in out["answer"]
-    )
+    assert "Correlation does not establish causation." in out["answer"]
 
     assert len(llm.calls) == 1
 
 
+# Verify that correlation exclusion count preserved.
 def test_correlation_exclusion_count_preserved(
     fake_llm,
     csv_file,
 ):
-    llm = fake_llm(
-        "result = {"
-        "'Pearson_Correlation': 0.5, "
-        "'Excluded_Rows': 2"
-        "}"
-    )
+    llm = fake_llm("result = {" "'Pearson_Correlation': 0.5, " "'Excluded_Rows': 2" "}")
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit.",
+        "Calculate the Pearson correlation " "between Sales and Profit.",
         explain=True,
     )
 
@@ -2621,26 +2620,21 @@ def test_correlation_exclusion_count_preserved(
     assert "**0.5000**" in out["answer"]
     assert "Excluded Rows is **2**." in out["answer"]
 
-    assert (
-        "Correlation does not establish causation."
-        in out["answer"]
-    )
+    assert "Correlation does not establish causation." in out["answer"]
 
     assert len(llm.calls) == 1
 
 
+# Verify that statistical prompt separates interpretation.
 def test_statistical_prompt_separates_interpretation(
     fake_llm,
     csv_file,
 ):
-    llm = fake_llm(
-        "result = 0.5"
-    )
+    llm = fake_llm("result = 0.5")
 
     out = run_analysis(
         csv_file,
-        "Calculate the Pearson correlation "
-        "between Sales and Profit and explain it.",
+        "Calculate the Pearson correlation " "between Sales and Profit and explain it.",
         explain=True,
     )
 
@@ -2650,14 +2644,9 @@ def test_statistical_prompt_separates_interpretation(
 
     assert (
         "Do not generate business interpretations "
-        "inside Python code."
-        in system_prompt
+        "inside Python code." in system_prompt
     )
 
-    assert (
-        "Describe correlation as association, "
-        "not causal impact."
-        in system_prompt
-    )
+    assert "Describe correlation as association, " "not causal impact." in system_prompt
 
     assert len(llm.calls) == 1

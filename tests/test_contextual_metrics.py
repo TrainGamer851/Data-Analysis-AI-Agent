@@ -6,27 +6,31 @@ from agent.contextual_metrics import (
 )
 
 
+# Create a representative dataset fixture for the analysis tests.
 @pytest.fixture
 def dataset():
-    return pd.DataFrame({
-        "Region": [
-            "West", "East", "West", "East"
-        ],
-        "Category": [
-            "Technology", "Furniture",
-            "Technology", "Furniture",
-        ],
-        "Order Date": [
-            "2023-01-15",
-            "2023-06-15",
-            "2024-01-15",
-            "2024-06-15",
-        ],
-        "Sales": [100, 200, 300, 400],
-        "Profit": [20, 10, 80, 40],
-    })
+    return pd.DataFrame(
+        {
+            "Region": ["West", "East", "West", "East"],
+            "Category": [
+                "Technology",
+                "Furniture",
+                "Technology",
+                "Furniture",
+            ],
+            "Order Date": [
+                "2023-01-15",
+                "2023-06-15",
+                "2024-01-15",
+                "2024-06-15",
+            ],
+            "Sales": [100, 200, 300, 400],
+            "Profit": [20, 10, 80, 40],
+        }
+    )
 
 
+# Create a conversation turn fixture with the requested content.
 def turn(question, answer="Completed analysis."):
     return [
         {
@@ -40,6 +44,7 @@ def turn(question, answer="Completed analysis."):
     ]
 
 
+# Verify that highest profit region.
 def test_highest_profit_region(dataset):
     result = try_contextual_analysis(
         dataset,
@@ -51,6 +56,7 @@ def test_highest_profit_region(dataset):
     assert "$100.00" in result["answer"]
 
 
+# Verify that lowest profit region.
 def test_lowest_profit_region(dataset):
     result = try_contextual_analysis(
         dataset,
@@ -61,10 +67,9 @@ def test_lowest_profit_region(dataset):
     assert "$50.00" in result["answer"]
 
 
+# Verify that absolute difference.
 def test_absolute_difference(dataset):
-    context = turn(
-        "Which region has the highest total profit?"
-    )
+    context = turn("Which region has the highest total profit?")
 
     result = try_contextual_analysis(
         dataset,
@@ -77,14 +82,11 @@ def test_absolute_difference(dataset):
     assert "East" in result["answer"]
 
 
+# Verify that percentage difference.
 def test_percentage_difference(dataset):
-    context = turn(
-        "Which region has the highest total profit?"
-    )
+    context = turn("Which region has the highest total profit?")
 
-    context += turn(
-        "How much higher is it than East?"
-    )
+    context += turn("How much higher is it than East?")
 
     result = try_contextual_analysis(
         dataset,
@@ -95,14 +97,11 @@ def test_percentage_difference(dataset):
     assert "100.00%" in result["answer"]
 
 
+# Verify that percentage reuses baseline.
 def test_percentage_reuses_baseline(dataset):
-    context = turn(
-        "Which region has the highest total profit?"
-    )
+    context = turn("Which region has the highest total profit?")
 
-    context += turn(
-        "How much higher is it than East?"
-    )
+    context += turn("How much higher is it than East?")
 
     result = try_contextual_analysis(
         dataset,
@@ -113,6 +112,7 @@ def test_percentage_reuses_baseline(dataset):
     assert "100.00%" in result["answer"]
 
 
+# Verify that grouped profit table.
 def test_grouped_profit_table(dataset):
     result = try_contextual_analysis(
         dataset,
@@ -131,10 +131,9 @@ def test_grouped_profit_table(dataset):
     ]
 
 
+# Verify that metric switch.
 def test_metric_switch(dataset):
-    context = turn(
-        "Show total profit by category in a table."
-    )
+    context = turn("Show total profit by category in a table.")
 
     result = try_contextual_analysis(
         dataset,
@@ -154,14 +153,11 @@ def test_metric_switch(dataset):
     ]
 
 
+# Verify that contextual highest sales.
 def test_contextual_highest_sales(dataset):
-    context = turn(
-        "Show total profit by category in a table."
-    )
+    context = turn("Show total profit by category in a table.")
 
-    context += turn(
-        "Now show sales instead."
-    )
+    context += turn("Now show sales instead.")
 
     result = try_contextual_analysis(
         dataset,
@@ -173,10 +169,9 @@ def test_contextual_highest_sales(dataset):
     assert "$600.00" in result["answer"]
 
 
+# Verify that lowest annual sales.
 def test_lowest_annual_sales(dataset):
-    context = turn(
-        "Show annual sales and profit by year."
-    )
+    context = turn("Show annual sales and profit by year.")
 
     result = try_contextual_analysis(
         dataset,
@@ -188,14 +183,11 @@ def test_lowest_annual_sales(dataset):
     assert "$300.00" in result["answer"]
 
 
+# Verify that profit in referenced year.
 def test_profit_in_referenced_year(dataset):
-    context = turn(
-        "Show annual sales and profit by year."
-    )
+    context = turn("Show annual sales and profit by year.")
 
-    context += turn(
-        "Which of those years had the lowest sales?"
-    )
+    context += turn("Which of those years had the lowest sales?")
 
     result = try_contextual_analysis(
         dataset,
@@ -207,10 +199,9 @@ def test_profit_in_referenced_year(dataset):
     assert "$30.00" in result["answer"]
 
 
+# Verify that reverse ranking.
 def test_reverse_ranking(dataset):
-    context = turn(
-        "Which region has the highest total profit?"
-    )
+    context = turn("Which region has the highest total profit?")
 
     result = try_contextual_analysis(
         dataset,
@@ -222,10 +213,9 @@ def test_reverse_ranking(dataset):
     assert "$50.00" in result["answer"]
 
 
+# Verify that top three.
 def test_top_three(dataset):
-    context = turn(
-        "Show total profit by category in a table."
-    )
+    context = turn("Show total profit by category in a table.")
 
     result = try_contextual_analysis(
         dataset,
@@ -235,20 +225,17 @@ def test_top_three(dataset):
 
     assert len(result["table"]) == 2
 
-    assert result["table"][0]["Category"] == (
-        "Technology"
-    )
+    assert result["table"][0]["Category"] == ("Technology")
 
 
+# Verify that zero percentage baseline.
 def test_zero_percentage_baseline(dataset):
     dataset.loc[
         dataset["Region"] == "East",
         "Profit",
     ] = 0
 
-    context = turn(
-        "Which region has the highest total profit?"
-    )
+    context = turn("Which region has the highest total profit?")
 
     result = try_contextual_analysis(
         dataset,
@@ -259,6 +246,7 @@ def test_zero_percentage_baseline(dataset):
     assert "nonpositive" in result["answer"]
 
 
+# Verify that missing context.
 def test_missing_context(dataset):
     result = try_contextual_analysis(
         dataset,
@@ -268,6 +256,7 @@ def test_missing_context(dataset):
     assert result is None
 
 
+# Verify that unsupported question uses ai.
 def test_unsupported_question_uses_ai(dataset):
     result = try_contextual_analysis(
         dataset,
@@ -277,6 +266,7 @@ def test_unsupported_question_uses_ai(dataset):
     assert result is None
 
 
+# Verify that missing metric uses ai.
 def test_missing_metric_uses_ai(dataset):
     dataset = dataset.drop(columns=["Profit"])
 
@@ -288,10 +278,9 @@ def test_missing_metric_uses_ai(dataset):
     assert result is None
 
 
+# Verify that invalid numeric values use ai.
 def test_invalid_numeric_values_use_ai(dataset):
-    dataset["Profit"] = [
-        "invalid", "10", "80", "40"
-    ]
+    dataset["Profit"] = ["invalid", "10", "80", "40"]
 
     result = try_contextual_analysis(
         dataset,
@@ -301,12 +290,11 @@ def test_invalid_numeric_values_use_ai(dataset):
     assert result is None
 
 
+# Verify that invalid dates use ai.
 def test_invalid_dates_use_ai(dataset):
     dataset.loc[0, "Order Date"] = "invalid"
 
-    context = turn(
-        "Show annual sales and profit by year."
-    )
+    context = turn("Show annual sales and profit by year.")
 
     result = try_contextual_analysis(
         dataset,
@@ -317,6 +305,7 @@ def test_invalid_dates_use_ai(dataset):
     assert result is None
 
 
+# Verify that tied ranking.
 def test_tied_ranking(dataset):
     dataset["Profit"] = [25, 25, 25, 25]
 
@@ -329,12 +318,11 @@ def test_tied_ranking(dataset):
     assert "East" in result["answer"]
 
 
+# Verify that tied reference requests clarification.
 def test_tied_reference_requests_clarification(dataset):
     dataset["Profit"] = [25, 25, 25, 25]
 
-    context = turn(
-        "Which region has the highest total profit?"
-    )
+    context = turn("Which region has the highest total profit?")
 
     result = try_contextual_analysis(
         dataset,
@@ -345,10 +333,9 @@ def test_tied_reference_requests_clarification(dataset):
     assert "Clarification needed" in result["answer"]
 
 
+# Verify that failed turn excluded.
 def test_failed_turn_excluded(dataset):
-    context = turn(
-        "Which region has the highest total profit?"
-    )
+    context = turn("Which region has the highest total profit?")
 
     context += turn(
         "Show total sales by category.",
@@ -364,6 +351,7 @@ def test_failed_turn_excluded(dataset):
     assert "$50.00" in result["answer"]
 
 
+# Verify that previous answer not used as numeric evidence.
 def test_previous_answer_not_used_as_numeric_evidence(dataset):
     context = turn(
         "Which region has the highest total profit?",
@@ -380,6 +368,7 @@ def test_previous_answer_not_used_as_numeric_evidence(dataset):
     assert "999999999" not in result["answer"]
 
 
+# Verify that dataset not modified.
 def test_dataset_not_modified(dataset):
     original = dataset.copy(deep=True)
 
@@ -394,14 +383,11 @@ def test_dataset_not_modified(dataset):
     )
 
 
+# Verify that unrelated question resets intent.
 def test_unrelated_question_resets_intent(dataset):
-    context = turn(
-        "Which region has the highest total profit?"
-    )
+    context = turn("Which region has the highest total profit?")
 
-    context += turn(
-        "How many unique customers are there?"
-    )
+    context += turn("How many unique customers are there?")
 
     result = try_contextual_analysis(
         dataset,

@@ -5,6 +5,7 @@ import pytest
 from agent import analysis_controller as controller
 
 
+# Restore the analysis controller's shutdown state for the test.
 @pytest.fixture(autouse=True)
 def reset_shutdown_state(monkeypatch):
     monkeypatch.setattr(
@@ -20,15 +21,15 @@ def reset_shutdown_state(monkeypatch):
     )
 
 
+# Verify that shutdown without active jobs.
 def test_shutdown_without_active_jobs():
-    result = controller.shutdown_analysis_jobs(
-        timeout=1
-    )
+    result = controller.shutdown_analysis_jobs(timeout=1)
 
     assert result is True
     assert controller._SHUTTING_DOWN is True
 
 
+# Verify that shutdown rejects new analysis.
 def test_shutdown_rejects_new_analysis():
     controller.shutdown_analysis_jobs(timeout=1)
 
@@ -40,12 +41,14 @@ def test_shutdown_rejects_new_analysis():
     assert "shutting down" in result["error"]
 
 
+# Verify that shutdown cancels active job.
 def test_shutdown_cancels_active_job():
     job = controller.AnalysisJob()
 
     with controller._RUNNING_CONDITION:
         controller._RUNNING_JOBS.add(job)
 
+    # Mark the mock analysis job as finished and notify waiters.
     def finish_job():
         job.cancel_event.wait(timeout=2)
 
@@ -58,9 +61,7 @@ def test_shutdown_cancels_active_job():
     thread.start()
 
     try:
-        result = controller.shutdown_analysis_jobs(
-            timeout=2
-        )
+        result = controller.shutdown_analysis_jobs(timeout=2)
 
         assert result is True
         assert job.cancelled is True
@@ -70,25 +71,21 @@ def test_shutdown_cancels_active_job():
         thread.join(timeout=3)
 
 
+# Verify that shutdown timeout.
 def test_shutdown_timeout():
     job = controller.AnalysisJob()
 
     with controller._RUNNING_CONDITION:
         controller._RUNNING_JOBS.add(job)
 
-    result = controller.shutdown_analysis_jobs(
-        timeout=0.1
-    )
+    result = controller.shutdown_analysis_jobs(timeout=0.1)
 
     assert result is False
     assert job.cancelled is True
 
 
+# Verify that shutdown can be called twice.
 def test_shutdown_can_be_called_twice():
-    assert controller.shutdown_analysis_jobs(
-        timeout=1
-    ) is True
+    assert controller.shutdown_analysis_jobs(timeout=1) is True
 
-    assert controller.shutdown_analysis_jobs(
-        timeout=1
-    ) is True
+    assert controller.shutdown_analysis_jobs(timeout=1) is True

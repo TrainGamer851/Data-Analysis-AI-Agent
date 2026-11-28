@@ -6,32 +6,36 @@ from agent.financial_metrics import (
 )
 
 
+# Create a representative dataset fixture for the analysis tests.
 @pytest.fixture
 def dataset():
-    return pd.DataFrame({
-        "Category": [
-            "Alpha",
-            "Alpha",
-            "Beta",
-            "Gamma",
-        ],
-        "Sub-Category": [
-            "Product A",
-            "Product A",
-            "Product B",
-            "Product C",
-        ],
-        "Region": [
-            "North",
-            "North",
-            "South",
-            "East",
-        ],
-        "Sales": [600, 400, 300, 200],
-        "Profit": [-60, -40, 60, 20],
-    })
+    return pd.DataFrame(
+        {
+            "Category": [
+                "Alpha",
+                "Alpha",
+                "Beta",
+                "Gamma",
+            ],
+            "Sub-Category": [
+                "Product A",
+                "Product A",
+                "Product B",
+                "Product C",
+            ],
+            "Region": [
+                "North",
+                "North",
+                "South",
+                "East",
+            ],
+            "Sales": [600, 400, 300, 200],
+            "Profit": [-60, -40, 60, 20],
+        }
+    )
 
 
+# Verify that above average sales negative profit.
 def test_above_average_sales_negative_profit(dataset):
     result = try_financial_analysis(
         dataset,
@@ -51,11 +55,11 @@ def test_above_average_sales_negative_profit(dataset):
     assert row["Average_Sales_Threshold"] == 500
 
 
+# Verify that profit margin below threshold.
 def test_profit_margin_below_threshold(dataset):
     result = try_financial_analysis(
         dataset,
-        "Which product categories have "
-        "a profit margin below 5%?",
+        "Which product categories have " "a profit margin below 5%?",
     )
 
     assert result["table"] == [
@@ -68,6 +72,7 @@ def test_profit_margin_below_threshold(dataset):
     ]
 
 
+# Verify that sales above threshold.
 def test_sales_above_threshold(dataset):
     result = try_financial_analysis(
         dataset,
@@ -82,6 +87,7 @@ def test_sales_above_threshold(dataset):
     ]
 
 
+# Verify that currency threshold with commas.
 def test_currency_threshold_with_commas(dataset):
     result = try_financial_analysis(
         dataset,
@@ -92,6 +98,7 @@ def test_currency_threshold_with_commas(dataset):
     assert result["table"] is None
 
 
+# Verify that profit below negative threshold.
 def test_profit_below_negative_threshold(dataset):
     result = try_financial_analysis(
         dataset,
@@ -102,20 +109,19 @@ def test_profit_below_negative_threshold(dataset):
     assert result["table"][0]["Total_Profit"] == -100
 
 
+# Verify that margin threshold is strict.
 def test_margin_threshold_is_strict(dataset):
     result = try_financial_analysis(
         dataset,
         "Which categories have profit margins below 10%?",
     )
 
-    names = [
-        row["Category"]
-        for row in result["table"]
-    ]
+    names = [row["Category"] for row in result["table"]]
 
     assert names == ["Alpha"]
 
 
+# Verify that zero sales margin is unavailable.
 def test_zero_sales_margin_is_unavailable(dataset):
     dataset.loc[
         dataset["Category"] == "Gamma",
@@ -129,12 +135,10 @@ def test_zero_sales_margin_is_unavailable(dataset):
 
     assert "unavailable" in result["answer"]
 
-    assert all(
-        row["Category"] != "Gamma"
-        for row in result["table"]
-    )
+    assert all(row["Category"] != "Gamma" for row in result["table"])
 
 
+# Verify that no matching groups.
 def test_no_matching_groups(dataset):
     result = try_financial_analysis(
         dataset,
@@ -146,6 +150,7 @@ def test_no_matching_groups(dataset):
     assert "No regions" in result["answer"]
 
 
+# Verify that no above average loss matches.
 def test_no_above_average_loss_matches(dataset):
     dataset["Profit"] = 100
 
@@ -159,6 +164,7 @@ def test_no_above_average_loss_matches(dataset):
     assert "No groups" in result["answer"]
 
 
+# Verify that missing required column uses fallback.
 def test_missing_required_column_uses_fallback(dataset):
     dataset = dataset.drop(columns=["Profit"])
 
@@ -170,6 +176,7 @@ def test_missing_required_column_uses_fallback(dataset):
     assert result is None
 
 
+# Verify that invalid numeric data uses fallback.
 def test_invalid_numeric_data_uses_fallback(dataset):
     dataset["Sales"] = [
         "invalid",
@@ -186,6 +193,7 @@ def test_invalid_numeric_data_uses_fallback(dataset):
     assert result is None
 
 
+# Verify that missing group values use fallback.
 def test_missing_group_values_use_fallback(dataset):
     dataset.loc[0, "Region"] = None
 
@@ -197,6 +205,7 @@ def test_missing_group_values_use_fallback(dataset):
     assert result is None
 
 
+# Verify that unsupported question uses ai.
 def test_unsupported_question_uses_ai(dataset):
     result = try_financial_analysis(
         dataset,
@@ -206,6 +215,7 @@ def test_unsupported_question_uses_ai(dataset):
     assert result is None
 
 
+# Verify that dataset not modified.
 def test_dataset_not_modified(dataset):
     original = dataset.copy(deep=True)
 
@@ -220,11 +230,14 @@ def test_dataset_not_modified(dataset):
     )
 
 
+# Verify that filtering uses unrounded values.
 def test_filtering_uses_unrounded_values():
-    dataset = pd.DataFrame({
-        "Region": ["A", "B"],
-        "Sales": [500.004, 500.0],
-    })
+    dataset = pd.DataFrame(
+        {
+            "Region": ["A", "B"],
+            "Sales": [500.004, 500.0],
+        }
+    )
 
     result = try_financial_analysis(
         dataset,
@@ -235,6 +248,7 @@ def test_filtering_uses_unrounded_values():
     assert result["table"][0]["Region"] == "A"
 
 
+# Verify that sales filter does not require profit.
 def test_sales_filter_does_not_require_profit(dataset):
     dataset = dataset.drop(columns=["Profit"])
 
@@ -246,12 +260,15 @@ def test_sales_filter_does_not_require_profit(dataset):
     assert result["table"][0]["Region"] == "North"
 
 
+# Verify that custom group values not hardcoded.
 def test_custom_group_values_not_hardcoded():
-    dataset = pd.DataFrame({
-        "Segment": ["Retail", "Wholesale"],
-        "Sales": [100, 200],
-        "Profit": [-20, 50],
-    })
+    dataset = pd.DataFrame(
+        {
+            "Segment": ["Retail", "Wholesale"],
+            "Sales": [100, 200],
+            "Profit": [-20, 50],
+        }
+    )
 
     result = try_financial_analysis(
         dataset,
@@ -261,14 +278,14 @@ def test_custom_group_values_not_hardcoded():
     assert result["table"][0]["Segment"] == "Retail"
 
 
+# Verify that result display limit.
 def test_result_display_limit():
-    dataset = pd.DataFrame({
-        "Region": [
-            f"Region {number}"
-            for number in range(205)
-        ],
-        "Sales": [100] * 205,
-    })
+    dataset = pd.DataFrame(
+        {
+            "Region": [f"Region {number}" for number in range(205)],
+            "Sales": [100] * 205,
+        }
+    )
 
     result = try_financial_analysis(
         dataset,
@@ -280,17 +297,20 @@ def test_result_display_limit():
     assert "Showing the first 200" in result["answer"]
 
 
-
+# Create a dataset fixture containing discount values.
 @pytest.fixture
 def discount_dataset():
-    return pd.DataFrame({
-        "Category": ["Alpha", "Alpha", "Beta", "Beta"],
-        "Sales": [100, 200, 300, 400],
-        "Profit": [30, -10, 20, 60],
-        "Discount": [0.1, 0.3, 0.05, 0.15],
-    })
+    return pd.DataFrame(
+        {
+            "Category": ["Alpha", "Alpha", "Beta", "Beta"],
+            "Sales": [100, 200, 300, 400],
+            "Profit": [30, -10, 20, 60],
+            "Discount": [0.1, 0.3, 0.05, 0.15],
+        }
+    )
 
 
+# Verify that discount relationship.
 def test_discount_relationship(discount_dataset):
     result = try_financial_analysis(
         discount_dataset,
@@ -300,10 +320,7 @@ def test_discount_relationship(discount_dataset):
 
     assert result["error"] is None
 
-    rows = {
-        row["Category"]: row
-        for row in result["table"]
-    }
+    rows = {row["Category"]: row for row in result["table"]}
 
     assert rows["Alpha"]["Total_Sales"] == 300
     assert rows["Alpha"]["Total_Profit"] == 20
@@ -314,15 +331,12 @@ def test_discount_relationship(discount_dataset):
     assert rows["Beta"]["Average_Discount_Pct"] == 10
     assert rows["Beta"]["Discount_Profit_Correlation"] == 1
 
-    assert "Correlation does not establish causation" in (
-        result["answer"]
-    )
+    assert "Correlation does not establish causation" in (result["answer"])
 
 
+# Verify that average discount without profit.
 def test_average_discount_without_profit(discount_dataset):
-    dataset = discount_dataset.drop(
-        columns=["Sales", "Profit"]
-    )
+    dataset = discount_dataset.drop(columns=["Sales", "Profit"])
 
     result = try_financial_analysis(
         dataset,
@@ -341,6 +355,7 @@ def test_average_discount_without_profit(discount_dataset):
     ]
 
 
+# Verify that percentage discount values.
 def test_percentage_discount_values(discount_dataset):
     discount_dataset["Discount"] = [10, 30, 5, 15]
 
@@ -352,12 +367,15 @@ def test_percentage_discount_values(discount_dataset):
     assert result["table"][0]["Average_Discount_Pct"] == 20
 
 
+# Verify that explicit percentage discount not multiplied.
 def test_explicit_percentage_discount_not_multiplied(
     discount_dataset,
 ):
-    dataset = discount_dataset.rename(columns={
-        "Discount": "Discount_Pct",
-    })
+    dataset = discount_dataset.rename(
+        columns={
+            "Discount": "Discount_Pct",
+        }
+    )
 
     result = try_financial_analysis(
         dataset,
@@ -367,6 +385,7 @@ def test_explicit_percentage_discount_not_multiplied(
     assert result["table"][0]["Average_Discount_Pct"] == 0.2
 
 
+# Verify that fractional discount assumption disclosed.
 def test_fractional_discount_assumption_disclosed(
     discount_dataset,
 ):
@@ -378,6 +397,7 @@ def test_fractional_discount_assumption_disclosed(
     assert "fractional discounts" in result["answer"]
 
 
+# Verify that constant discount correlation unavailable.
 def test_constant_discount_correlation_unavailable(
     discount_dataset,
 ):
@@ -389,14 +409,12 @@ def test_constant_discount_correlation_unavailable(
         "and profitability across categories.",
     )
 
-    assert all(
-        row["Discount_Profit_Correlation"] is None
-        for row in result["table"]
-    )
+    assert all(row["Discount_Profit_Correlation"] is None for row in result["table"])
 
     assert "unavailable" in result["answer"].lower()
 
 
+# Verify that constant profit correlation unavailable.
 def test_constant_profit_correlation_unavailable(
     discount_dataset,
 ):
@@ -408,12 +426,10 @@ def test_constant_profit_correlation_unavailable(
         "and profitability across categories.",
     )
 
-    assert all(
-        row["Discount_Profit_Correlation"] is None
-        for row in result["table"]
-    )
+    assert all(row["Discount_Profit_Correlation"] is None for row in result["table"])
 
 
+# Verify that missing discount uses valid observations.
 def test_missing_discount_uses_valid_observations(
     discount_dataset,
 ):
@@ -432,6 +448,7 @@ def test_missing_discount_uses_valid_observations(
     assert alpha["Total_Sales"] == 300
 
 
+# Verify that invalid discount uses fallback.
 @pytest.mark.parametrize(
     "discounts",
     [
@@ -456,6 +473,7 @@ def test_invalid_discount_uses_fallback(
     assert result is None
 
 
+# Verify that discount analysis preserves dataset.
 def test_discount_analysis_preserves_dataset(
     discount_dataset,
 ):
@@ -473,12 +491,15 @@ def test_discount_analysis_preserves_dataset(
     )
 
 
+# Verify that discount analysis supports custom segments.
 def test_discount_analysis_supports_custom_segments(
     discount_dataset,
 ):
-    dataset = discount_dataset.rename(columns={
-        "Category": "Segment",
-    })
+    dataset = discount_dataset.rename(
+        columns={
+            "Category": "Segment",
+        }
+    )
 
     result = try_financial_analysis(
         dataset,
@@ -489,6 +510,7 @@ def test_discount_analysis_supports_custom_segments(
     assert result["table"][0]["Average_Discount_Pct"] == 20
 
 
+# Verify that discount recommendation uses fallback.
 def test_discount_recommendation_uses_fallback(
     discount_dataset,
 ):
@@ -500,6 +522,7 @@ def test_discount_recommendation_uses_fallback(
     assert result is None
 
 
+# Verify that discount extrema preserve ties.
 def test_discount_extrema_preserve_ties(
     discount_dataset,
 ):
@@ -513,13 +536,16 @@ def test_discount_extrema_preserve_ties(
     assert "**Alpha**, **Beta**" in result["answer"]
 
 
+# Verify that discount correlation precision.
 def test_discount_correlation_precision():
-    dataset = pd.DataFrame({
-        "Category": ["Alpha"] * 4,
-        "Sales": [100, 200, 300, 400],
-        "Profit": [10, 30, 20, 15],
-        "Discount": [0.1, 0.2, 0.3, 0.4],
-    })
+    dataset = pd.DataFrame(
+        {
+            "Category": ["Alpha"] * 4,
+            "Sales": [100, 200, 300, 400],
+            "Profit": [10, 30, 20, 15],
+            "Discount": [0.1, 0.2, 0.3, 0.4],
+        }
+    )
 
     result = try_financial_analysis(
         dataset,
@@ -532,12 +558,10 @@ def test_discount_correlation_precision():
         4,
     )
 
-    assert (
-        result["table"][0]["Discount_Profit_Correlation"]
-        == expected
-    )
+    assert result["table"][0]["Discount_Profit_Correlation"] == expected
 
 
+# Verify that discount zero sales margin unavailable.
 def test_discount_zero_sales_margin_unavailable(
     discount_dataset,
 ):
@@ -549,12 +573,10 @@ def test_discount_zero_sales_margin_unavailable(
         "and profitability across categories.",
     )
 
-    assert all(
-        row["Profit_Margin_Pct"] is None
-        for row in result["table"]
-    )
+    assert all(row["Profit_Margin_Pct"] is None for row in result["table"])
 
 
+# Verify that ambiguous discount columns use fallback.
 def test_ambiguous_discount_columns_use_fallback(
     discount_dataset,
 ):

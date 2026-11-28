@@ -1,5 +1,3 @@
-"""Tests for Component 2: LLM Integration."""
-
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -39,6 +37,7 @@ def test_model_configuration(monkeypatch):
     assert config["base_url"] == "https://ellm.nrp-nautilus.io/v1"
 
 
+# Missing credentials should raise an error.
 def test_missing_api_key(monkeypatch):
     # Set up environment variables for the NRP provider to ensure consistent test behavior.
     """Missing credentials should raise an error."""
@@ -51,6 +50,7 @@ def test_missing_api_key(monkeypatch):
         get_model_config()
 
 
+# Check that an OpenAI-compatible client is created.
 def test_client_creation(monkeypatch):
     # Set up environment variables for the NRP provider to ensure consistent test behavior.
     """Check that an OpenAI-compatible client is created."""
@@ -63,6 +63,7 @@ def test_client_creation(monkeypatch):
     assert client is not None
 
 
+# Check response handling without making an API request.
 def test_generate_response(monkeypatch):
     # Set up environment variables for the NRP provider to ensure consistent test behavior.
     """Check response handling without making an API request."""
@@ -87,6 +88,7 @@ def test_generate_response(monkeypatch):
     assert mock_client.chat.completions.create.call_args.kwargs["model"] == "qwen3"
 
 
+# The prompt should include actual dataset columns.
 def test_business_analysis_prompt():
     # Test that the analysis prompt correctly incorporates the dataframe schema and the business question.
     """The prompt should include actual dataset columns."""
@@ -111,6 +113,7 @@ def test_business_analysis_prompt():
     assert "result" in prompt
 
 
+# The system prompt should require dataset-based calculations.
 def test_code_generation_instructions():
     # Verify that the system prompt contains essential instructions for code generation.
     """The system prompt should require dataset-based calculations."""
@@ -120,6 +123,7 @@ def test_code_generation_instructions():
     assert "Do not hardcode" in SYSTEM_PROMPT
 
 
+# Recommendations should use evidence and acknowledge limitations.
 def test_business_recommendation_prompt():
     # Build the recommendation prompt and check that it includes key instructions and context.
     """Recommendations should use evidence and acknowledge limitations."""
@@ -129,6 +133,7 @@ def test_business_recommendation_prompt():
     assert "sources" in BUSINESS_RECOMMENDATION_PROMPT.lower()
 
 
+# Recommendation prompts should contain calculated evidence.
 def test_recommendation_uses_supplied_evidence():
     # Provide a question, calculation results, and research sources to the recommendation prompt.
     """Recommendation prompts should contain calculated evidence."""
@@ -149,6 +154,7 @@ def test_recommendation_uses_supplied_evidence():
     assert "https://example.org/report" in prompt
 
 
+# The prompt must disclose when research was not performed.
 def test_recommendation_without_research():
     # Test the behavior when no research sources are provided.
     """The prompt must disclose when research was not performed."""
@@ -166,6 +172,7 @@ def test_recommendation_without_research():
 # ---------------------------------------------------------
 
 
+# Ollama should use the local Qwen3 model.
 def test_ollama_model_configuration(monkeypatch):
     # Set up environment variables for Ollama provider.
     """Ollama should use the local Qwen3 model."""
@@ -187,6 +194,7 @@ def test_ollama_model_configuration(monkeypatch):
     assert config["api_key"] == "ollama"
 
 
+# Ollama should work without an NRP API key.
 def test_ollama_does_not_require_nrp_key(monkeypatch):
     # Configure Ollama provider without setting NRP API key to test fallback behavior.
     """Ollama should work without an NRP API key."""
@@ -202,6 +210,7 @@ def test_ollama_does_not_require_nrp_key(monkeypatch):
     assert config["api_key"] == "ollama"
 
 
+# Ollama client should connect to localhost.
 def test_ollama_client_creation(monkeypatch):
     # Set up environment variables for the Ollama provider to point to the local API.
     """Ollama client should connect to localhost."""
@@ -220,8 +229,8 @@ def test_ollama_client_creation(monkeypatch):
     assert client.api_key == "ollama"
 
 
+# Verify the native Ollama API receives the correct request.
 def test_ollama_generate_response(monkeypatch):
-    """Verify the native Ollama API receives the correct request."""
     from unittest.mock import MagicMock, patch
     from agent.llm_client import generate_response
 
@@ -232,15 +241,11 @@ def test_ollama_generate_response(monkeypatch):
         "http://localhost:11434/v1",
     )
 
-    messages = [
-        {"role": "user", "content": "Say hello"}
-    ]
+    messages = [{"role": "user", "content": "Say hello"}]
 
     mock_response = MagicMock()
     mock_response.json.return_value = {
-        "message": {
-            "content": "Hello from Ollama"
-        },
+        "message": {"content": "Hello from Ollama"},
         "done_reason": "stop",
     }
 
@@ -270,6 +275,7 @@ def test_ollama_generate_response(monkeypatch):
     mock_response.raise_for_status.assert_called_once()
 
 
+# Switching providers should select the correct configuration.
 def test_switch_from_ollama_to_nrp(monkeypatch):
     # Test switching from Ollama to NRP provider and verify configurations.
     """Switching providers should select the correct configuration."""
@@ -292,6 +298,7 @@ def test_switch_from_ollama_to_nrp(monkeypatch):
     assert nrp_config["api_key"] == "fake-test-key"
 
 
+# Verify that nrp custom request timeout.
 def test_nrp_custom_request_timeout(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "nrp")
     monkeypatch.setenv("NRP_API_KEY", "fake-test-key")
@@ -302,8 +309,9 @@ def test_nrp_custom_request_timeout(monkeypatch):
 
     mock_client = MagicMock()
 
-    mock_client.chat.completions.create.return_value \
-        .choices[0].message.content = "result = 100"
+    mock_client.chat.completions.create.return_value.choices[0].message.content = (
+        "result = 100"
+    )
 
     with patch(
         "agent.llm_client.get_client",
@@ -316,12 +324,10 @@ def test_nrp_custom_request_timeout(monkeypatch):
 
     assert response == "result = 100"
 
-    assert (
-        mock_client.chat.completions.create
-        .call_args.kwargs["timeout"] == 30
-    )
+    assert mock_client.chat.completions.create.call_args.kwargs["timeout"] == 30
 
 
+# Verify that ollama custom request timeout.
 def test_ollama_custom_request_timeout(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
     monkeypatch.delenv(
@@ -350,6 +356,7 @@ def test_ollama_custom_request_timeout(monkeypatch):
     assert mock_post.call_args.kwargs["timeout"] == 20
 
 
+# Verify that expired budget prevents network request.
 def test_expired_budget_prevents_network_request(
     monkeypatch,
 ):
@@ -360,21 +367,20 @@ def test_expired_budget_prevents_network_request(
         "0",
     )
 
-    with patch(
-        "agent.llm_client.get_client"
-    ) as mock_client:
+    with patch("agent.llm_client.get_client") as mock_client:
 
         with pytest.raises(AnalysisBudgetExceeded):
-            generate_response(
-                [{"role": "user", "content": "Calculate sales"}]
-            )
+            generate_response([{"role": "user", "content": "Calculate sales"}])
 
     mock_client.assert_not_called()
+
 
 # ---------------------------------------------------------
 # LLM inference optimization tests
 # ---------------------------------------------------------
 
+
+# Verify that generation profiles.
 @pytest.mark.parametrize(
     "purpose,expected_tokens",
     [
@@ -392,6 +398,7 @@ def test_generation_profiles(purpose, expected_tokens):
     assert settings["temperature"] == 0.0
 
 
+# Verify that invalid generation profile.
 def test_invalid_generation_profile():
     from agent.llm_client import get_generation_settings
 
@@ -402,6 +409,7 @@ def test_invalid_generation_profile():
         get_generation_settings("invalid")
 
 
+# Verify that nrp generation settings.
 @pytest.mark.parametrize(
     "purpose,expected_tokens",
     [
@@ -426,8 +434,9 @@ def test_nrp_generation_settings(
 
     mock_client = MagicMock()
 
-    mock_client.chat.completions.create.return_value \
-        .choices[0].message.content = "result = 100"
+    mock_client.chat.completions.create.return_value.choices[0].message.content = (
+        "result = 100"
+    )
 
     with patch(
         "agent.llm_client.get_client",
@@ -439,10 +448,7 @@ def test_nrp_generation_settings(
             timeout=30,
         )
 
-    options = (
-        mock_client.chat.completions.create
-        .call_args.kwargs
-    )
+    options = mock_client.chat.completions.create.call_args.kwargs
 
     assert result == "result = 100"
     assert options["max_tokens"] == expected_tokens
@@ -451,6 +457,7 @@ def test_nrp_generation_settings(
     assert "extra_body" not in options
 
 
+# Verify that nrp disable thinking.
 def test_nrp_disable_thinking(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "nrp")
     monkeypatch.setenv("NRP_API_KEY", "fake-test-key")
@@ -464,8 +471,9 @@ def test_nrp_disable_thinking(monkeypatch):
 
     mock_client = MagicMock()
 
-    mock_client.chat.completions.create.return_value \
-        .choices[0].message.content = "result = 100"
+    mock_client.chat.completions.create.return_value.choices[0].message.content = (
+        "result = 100"
+    )
 
     with patch(
         "agent.llm_client.get_client",
@@ -476,10 +484,7 @@ def test_nrp_disable_thinking(monkeypatch):
             purpose="code",
         )
 
-    options = (
-        mock_client.chat.completions.create
-        .call_args.kwargs
-    )
+    options = mock_client.chat.completions.create.call_args.kwargs
 
     assert options["extra_body"] == {
         "chat_template_kwargs": {
@@ -488,6 +493,7 @@ def test_nrp_disable_thinking(monkeypatch):
     }
 
 
+# Verify that non qwen model ignores thinking setting.
 def test_non_qwen_model_ignores_thinking_setting(
     monkeypatch,
 ):
@@ -498,6 +504,7 @@ def test_non_qwen_model_ignores_thinking_setting(
     assert get_nrp_extra_body("another-model") == {}
 
 
+# Verify that nrp truncated code is discarded.
 def test_nrp_truncated_code_is_discarded(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "nrp")
     monkeypatch.setenv("NRP_API_KEY", "fake-test-key")
@@ -510,10 +517,7 @@ def test_nrp_truncated_code_is_discarded(monkeypatch):
 
     mock_client = MagicMock()
 
-    choice = (
-        mock_client.chat.completions.create
-        .return_value.choices[0]
-    )
+    choice = mock_client.chat.completions.create.return_value.choices[0]
 
     choice.message.content = "result = df.groupby("
     choice.finish_reason = "length"
@@ -530,6 +534,7 @@ def test_nrp_truncated_code_is_discarded(monkeypatch):
     assert result == ""
 
 
+# Verify that ollama explanation profile.
 def test_ollama_explanation_profile(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
 
@@ -541,9 +546,7 @@ def test_ollama_explanation_profile(monkeypatch):
     mock_response = MagicMock()
 
     mock_response.json.return_value = {
-        "message": {
-            "content": "Total sales are $100."
-        },
+        "message": {"content": "Total sales are $100."},
         "done_reason": "stop",
     }
 
@@ -564,40 +567,32 @@ def test_ollama_explanation_profile(monkeypatch):
     assert payload["options"]["temperature"] == 0.0
 
 
+# Verify that discount percentage prompt convention.
 def test_discount_percentage_prompt_convention():
     assert "Average_Discount_Pct" in SYSTEM_PROMPT
     assert "do not multiply again" in SYSTEM_PROMPT
     assert "percentage points" in SYSTEM_PROMPT
 
 
+# Verify that correlation calculation prompt rules.
 def test_correlation_calculation_prompt_rules():
     assert "paired valid observations" in SYSTEM_PROMPT
     assert "zero variance" in SYSTEM_PROMPT
-    assert (
-        "Never replace an undefined correlation with zero."
-        in SYSTEM_PROMPT
-    )
+    assert "Never replace an undefined correlation with zero." in SYSTEM_PROMPT
 
 
+# Verify that explanation prevents causal claims.
 def test_explanation_prevents_causal_claims():
     from agent.prompts import EXPLANATION_PROMPT
 
-    assert (
-        "Do not infer causation from correlation."
-        in EXPLANATION_PROMPT
-    )
+    assert "Do not infer causation from correlation." in EXPLANATION_PROMPT
 
-    assert (
-        "Correlation does not establish causation."
-        in EXPLANATION_PROMPT
-    )
+    assert "Correlation does not establish causation." in EXPLANATION_PROMPT
 
-    assert (
-        "Do not claim an overall correlation"
-        in EXPLANATION_PROMPT
-    )
+    assert "Do not claim an overall correlation" in EXPLANATION_PROMPT
 
 
+# Verify that recommendations acknowledge uncertainty.
 def test_recommendations_acknowledge_uncertainty():
     from agent.prompts import EXPLANATION_PROMPT
 

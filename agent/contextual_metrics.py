@@ -1,5 +1,3 @@
-"""Deterministic financial analysis and contextual follow-ups."""
-
 import math
 import re
 
@@ -18,7 +16,6 @@ from agent.conversation_context import (
     build_conversation_context,
 )
 
-
 GROUPS = {
     "region": "Region",
     "category": "Category",
@@ -36,8 +33,8 @@ ANNUAL_REQUESTS = {
 }
 
 
+# Calculate validated totals without modifying the dataset.
 def grouped_totals(df, group, metric):
-    """Calculate validated totals without modifying the dataset."""
 
     timer = DebugTimer("CALCULATION")
 
@@ -51,6 +48,7 @@ def grouped_totals(df, group, metric):
         f"Input dataset rows: {len(df):,}",
     )
 
+    # Call `debug_log` when `df.empty or metric not in df.columns`.
     if df.empty or metric not in df.columns:
         debug_log(
             "VALIDATION",
@@ -64,29 +62,33 @@ def grouped_totals(df, group, metric):
         errors="coerce",
     )
 
-    if (
-        values.isna().any()
-        or not values.map(math.isfinite).all()
-    ):
+    # Return `None` when `values.isna().any() or not values.map(math.isfinite).all()`.
+    if values.isna().any() or not values.map(math.isfinite).all():
         return None
 
+    # Evaluate the nested condition when `group == 'Year'`.
     if group == "Year":
+        # Return `None` when `'Order Date' not in df.columns`.
         if "Order Date" not in df.columns:
             return None
 
         dates = parse_order_dates(df["Order Date"])
 
+        # Return `None` when `dates is None or dates.isna().any()`.
         if dates is None or dates.isna().any():
             return None
 
         labels = dates.dt.year.astype(int)
 
+    # Evaluate the nested condition when no earlier condition matches.
     else:
+        # Return `None` when `group not in df.columns`.
         if group not in df.columns:
             return None
 
         labels = df[group]
 
+        # Return `None` when `labels.isna().any()`.
         if labels.isna().any():
             return None
 
@@ -102,18 +104,18 @@ def grouped_totals(df, group, metric):
         f"Groups calculated: {len(totals)}",
     )
 
-    if (
-        totals.empty
-        or not totals.map(math.isfinite).all()
-    ):
+    # Return `None` when `totals.empty or not totals.map(math.isfinite).all()`.
+    if totals.empty or not totals.map(math.isfinite).all():
         return None
 
+    # Process each `(label, value)` from `totals.head(30).items()`.
     for label, value in totals.head(30).items():
         debug_log(
             "GROUP TOTAL",
             f"{label} | {metric}: {float(value):,.2f}",
         )
 
+    # Call `debug_log` when `len(totals) > 30`.
     if len(totals) > 30:
         debug_log(
             "GROUP TOTAL",
@@ -125,14 +127,10 @@ def grouped_totals(df, group, metric):
     return totals
 
 
+# Return the highest or lowest group and its value.
 def ranking_result(totals, group, metric, direction):
-    """Return the highest or lowest group and its value."""
 
-    value = (
-        totals.max()
-        if direction == "highest"
-        else totals.min()
-    )
+    value = totals.max() if direction == "highest" else totals.min()
 
     winners = totals.index[totals == value]
 
@@ -170,15 +168,18 @@ def ranking_result(totals, group, metric, direction):
     )
 
 
+# Return a structured table for the existing chart builder.
 def table_result(totals, group, metric, limit=None):
-    """Return a structured table for the existing chart builder."""
 
+    # Update `totals` when `group == 'Year' and limit is None`.
     if group == "Year" and limit is None:
         totals = totals.sort_index()
 
+    # Update `totals` when no earlier condition matches.
     else:
         totals = totals.sort_values(ascending=False)
 
+    # Update `totals` when `limit is not None`.
     if limit is not None:
         totals = totals.head(limit)
 
@@ -206,54 +207,47 @@ def table_result(totals, group, metric, limit=None):
     ]
 
     return response(
-        f"Total {metric.lower()} by {group.lower()} "
-        f"is shown below.",
+        f"Total {metric.lower()} by {group.lower()} " f"is shown below.",
         rows,
     )
 
 
+# Match an actual dataset label without guessing.
 def match_label(totals, name):
-    """Match an actual dataset label without guessing."""
 
     matches = [
-        label
-        for label in totals.index
-        if normalize_question(str(label)) == name
+        label for label in totals.index if normalize_question(str(label)) == name
     ]
 
     return matches[0] if len(matches) == 1 else None
 
 
+# Resolve a singular reference only when there is one winner.
 def unique_winner(totals, direction):
-    """Resolve a singular reference only when there is one winner."""
 
-    value = (
-        totals.max()
-        if direction == "highest"
-        else totals.min()
-    )
+    value = totals.max() if direction == "highest" else totals.min()
 
     winners = totals.index[totals == value]
 
+    # Return `None` when `len(winners) != 1`.
     if len(winners) != 1:
         return None
 
     return winners[0]
 
 
+# Build a clarification response when the dataset or question is ambiguous.
 def clarification(message):
     debug_log(
         "CLARIFICATION",
         message,
     )
 
-    return response(
-        f"**Clarification needed:** {message}"
-    )
+    return response(f"**Clarification needed:** {message}")
 
 
+# Resolve a supported question into a structured intent.
 def resolve_intent(question, previous=None):
-    """Resolve a supported question into a structured intent."""
 
     q = normalize_question(question)
 
@@ -265,6 +259,7 @@ def resolve_intent(question, previous=None):
         q,
     )
 
+    # Update `(group, direction, metric)` when `match`.
     if match:
         group, direction, metric = match.groups()
 
@@ -277,11 +272,11 @@ def resolve_intent(question, previous=None):
 
     # Standalone grouped table.
     match = re.fullmatch(
-        r"show (?:total )?(sales|profit) "
-        r"by (region|category|year)(?: in a table)?",
+        r"show (?:total )?(sales|profit) " r"by (region|category|year)(?: in a table)?",
         q,
     )
 
+    # Update `(metric, group)` when `match`.
     if match:
         metric, group = match.groups()
 
@@ -298,6 +293,7 @@ def resolve_intent(question, previous=None):
             "group": "Year",
         }
 
+    # Return `None` when `previous is None`.
     if previous is None:
         return None
 
@@ -310,9 +306,8 @@ def resolve_intent(question, previous=None):
         q,
     )
 
-    if match and group and previous["kind"] in {
-        "table", "ranking", "annual", "top"
-    }:
+    # Return the selected result when `match and group and (previous['kind'] in {'table', 'ranking', 'annual', 'top'})`.
+    if match and group and previous["kind"] in {"table", "ranking", "annual", "top"}:
         return {
             "kind": "table",
             "group": group,
@@ -321,14 +316,12 @@ def resolve_intent(question, previous=None):
 
     # Contextual ranking.
     match = re.fullmatch(
-        r"which one (?:has|had) the "
-        r"(highest|lowest) (?:total )?(sales|profit)",
+        r"which one (?:has|had) the " r"(highest|lowest) (?:total )?(sales|profit)",
         q,
     )
 
-    if match and group and previous["kind"] in {
-        "table", "ranking", "annual", "top"
-    }:
+    # Update `(direction, new_metric)` when `match and group and (previous['kind'] in {'table', 'ranking', 'annual', 'top'})`.
+    if match and group and previous["kind"] in {"table", "ranking", "annual", "top"}:
         direction, new_metric = match.groups()
 
         return {
@@ -340,11 +333,11 @@ def resolve_intent(question, previous=None):
 
     # Annual ranking follow-up.
     match = re.fullmatch(
-        r"which of those years had the "
-        r"(highest|lowest) (?:total )?(sales|profit)",
+        r"which of those years had the " r"(highest|lowest) (?:total )?(sales|profit)",
         q,
     )
 
+    # Update `(direction, new_metric)` when `match and group == 'Year'`.
     if match and group == "Year":
         direction, new_metric = match.groups()
 
@@ -361,7 +354,9 @@ def resolve_intent(question, previous=None):
         q,
     )
 
+    # Evaluate the nested condition when `match and group and metric`.
     if match and group and metric:
+        # Return the selected result when `previous['kind'] == 'ranking'`.
         if previous["kind"] == "ranking":
             return {
                 "kind": "ranking",
@@ -376,6 +371,7 @@ def resolve_intent(question, previous=None):
         q,
     )
 
+    # Return the selected result when `match and previous['kind'] == 'ranking'`.
     if match and previous["kind"] == "ranking":
         return {
             "kind": "comparison",
@@ -392,9 +388,8 @@ def resolve_intent(question, previous=None):
         q,
     )
 
-    if match and previous["kind"] in {
-        "ranking", "comparison"
-    }:
+    # Return the selected result when `match and previous['kind'] in {'ranking', 'comparison'}`.
+    if match and previous["kind"] in {"ranking", "comparison"}:
         return {
             "kind": "comparison",
             "group": group,
@@ -405,10 +400,14 @@ def resolve_intent(question, previous=None):
         }
 
     # Reuse the previous comparison baseline.
-    if q in {
-        "what is the percentage difference",
-        "show me the percentage difference",
-    } and previous["kind"] == "comparison":
+    if (
+        q
+        in {
+            "what is the percentage difference",
+            "show me the percentage difference",
+        }
+        and previous["kind"] == "comparison"
+    ):
         return {
             **previous,
             "percentage": True,
@@ -420,11 +419,8 @@ def resolve_intent(question, previous=None):
         q,
     )
 
-    if (
-        match
-        and group == "Year"
-        and previous["kind"] == "ranking"
-    ):
+    # Return the selected result when `match and group == 'Year' and (previous['kind'] == 'ranking')`.
+    if match and group == "Year" and previous["kind"] == "ranking":
         return {
             "kind": "year_value",
             "group": "Year",
@@ -439,7 +435,9 @@ def resolve_intent(question, previous=None):
         q,
     )
 
+    # Evaluate the nested condition when `match and group and metric`.
     if match and group and metric:
+        # Update `raw_limit` when `previous['kind'] in {'ranking', 'table', 'top'}`.
         if previous["kind"] in {"ranking", "table", "top"}:
             raw_limit = match.group(1)
 
@@ -449,12 +447,9 @@ def resolve_intent(question, previous=None):
                 "ten": 10,
             }
 
-            limit = (
-                words[raw_limit]
-                if raw_limit in words
-                else int(raw_limit)
-            )
+            limit = words[raw_limit] if raw_limit in words else int(raw_limit)
 
+            # Return the selected result when `1 <= limit <= 30`.
             if 1 <= limit <= 30:
                 return {
                     "kind": "top",
@@ -466,8 +461,8 @@ def resolve_intent(question, previous=None):
     return None
 
 
+# Reconstruct intent from completed previous questions.
 def resolve_previous_context(context):
-    """Reconstruct intent from completed previous questions."""
 
     history = build_conversation_context(context)
 
@@ -478,7 +473,9 @@ def resolve_previous_context(context):
 
     previous = None
 
+    # Process each `message` from `history`.
     for message in history:
+        # Call `debug_log` when `message['role'] == 'user'`.
         if message["role"] == "user":
             debug_log(
                 "CONTEXT",
@@ -495,10 +492,10 @@ def resolve_previous_context(context):
                 f"Historical intent: {previous}",
             )
 
+        # Evaluate the nested condition when `message['role'] == 'assistant'`.
         elif message["role"] == "assistant":
-            if message["content"].startswith(
-                "**Clarification needed:**"
-            ):
+            # Call `debug_log` when `message['content'].startswith('**Clarification needed:**')`.
+            if message["content"].startswith("**Clarification needed:**"):
                 debug_log(
                     "CONTEXT",
                     "Previous clarification invalidated intent",
@@ -514,8 +511,8 @@ def resolve_previous_context(context):
     return previous
 
 
+# Return a deterministic answer or None for AI fallback.
 def try_contextual_analysis(df, question, context=None):
-    """Return a deterministic answer or None for AI fallback."""
 
     debug_log(
         "CONTEXTUAL",
@@ -531,6 +528,7 @@ def try_contextual_analysis(df, question, context=None):
 
     intent = resolve_intent(question, previous)
 
+    # Call `debug_log` when `intent is None`.
     if intent is None:
         debug_log(
             "CONTEXTUAL",
@@ -570,6 +568,7 @@ def try_contextual_analysis(df, question, context=None):
 
     totals = grouped_totals(df, group, metric)
 
+    # Call `debug_log` when `totals is None`.
     if totals is None:
         debug_log(
             "CONTEXTUAL",
@@ -578,6 +577,7 @@ def try_contextual_analysis(df, question, context=None):
 
         return None
 
+    # Return the selected result when `kind == 'ranking'`.
     if kind == "ranking":
         return ranking_result(
             totals,
@@ -586,6 +586,7 @@ def try_contextual_analysis(df, question, context=None):
             intent["direction"],
         )
 
+    # Return the selected result when `kind in {'table', 'top'}`.
     if kind in {"table", "top"}:
         return table_result(
             totals,
@@ -594,16 +595,17 @@ def try_contextual_analysis(df, question, context=None):
             limit=intent.get("limit"),
         )
 
+    # Update `selected` when `kind == 'comparison'`.
     if kind == "comparison":
         selected = unique_winner(
             totals,
             intent["direction"],
         )
 
+        # Return the selected result when `selected is None`.
         if selected is None:
             return clarification(
-                "Multiple groups share the ranking. "
-                "Which group should be compared?"
+                "Multiple groups share the ranking. " "Which group should be compared?"
             )
 
         reference = match_label(
@@ -611,10 +613,10 @@ def try_contextual_analysis(df, question, context=None):
             intent["reference"],
         )
 
+        # Return the selected result when `reference is None`.
         if reference is None:
             return clarification(
-                "Which dataset group should be "
-                "used as the comparison baseline?"
+                "Which dataset group should be " "used as the comparison baseline?"
             )
 
         selected_value = float(totals.loc[selected])
@@ -654,7 +656,9 @@ def try_contextual_analysis(df, question, context=None):
             f"Absolute difference: {money(abs(difference))}",
         )
 
+        # Evaluate the nested condition when `intent['percentage']`.
         if intent["percentage"]:
+            # Return the selected result when `reference_value <= 0`.
             if reference_value <= 0:
                 return response(
                     "A relative percentage difference "
@@ -666,8 +670,7 @@ def try_contextual_analysis(df, question, context=None):
 
             debug_log(
                 "CALCULATION",
-                f"({difference:.6f} / "
-                f"{reference_value:.6f}) * 100",
+                f"({difference:.6f} / " f"{reference_value:.6f}) * 100",
             )
 
             debug_log(
@@ -682,6 +685,7 @@ def try_contextual_analysis(df, question, context=None):
                 f"{metric.lower()}."
             )
 
+        # Return the selected result when `difference == 0`.
         if difference == 0:
             return response(
                 f"**{selected}** and **{reference}** "
@@ -696,6 +700,7 @@ def try_contextual_analysis(df, question, context=None):
             f"than **{reference}**'s."
         )
 
+    # Update `previous_totals` when `kind == 'year_value'`.
     if kind == "year_value":
         previous_totals = grouped_totals(
             df,
@@ -703,6 +708,7 @@ def try_contextual_analysis(df, question, context=None):
             intent["previous_metric"],
         )
 
+        # Return `None` when `previous_totals is None`.
         if previous_totals is None:
             return None
 
@@ -711,12 +717,13 @@ def try_contextual_analysis(df, question, context=None):
             intent["direction"],
         )
 
+        # Return the selected result when `year is None`.
         if year is None:
             return clarification(
-                "Multiple years share the ranking. "
-                "Which year do you mean?"
+                "Multiple years share the ranking. " "Which year do you mean?"
             )
 
+        # Return `None` when `year not in totals.index`.
         if year not in totals.index:
             return None
 
@@ -727,14 +734,12 @@ def try_contextual_analysis(df, question, context=None):
 
         debug_log(
             "CONTEXTUAL",
-            f"Previous ranking metric: "
-            f"{intent['previous_metric']}",
+            f"Previous ranking metric: " f"{intent['previous_metric']}",
         )
 
         debug_log(
             "CALCULATION",
-            f"Total {metric} in {year}: "
-            f"{money(totals.loc[year])}",
+            f"Total {metric} in {year}: " f"{money(totals.loc[year])}",
         )
 
         return response(

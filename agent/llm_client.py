@@ -26,26 +26,21 @@ GENERATION_PROFILES = {
 }
 
 
+# Return generation settings.
 def get_generation_settings(purpose):
+    # Raise `ValueError` when `purpose not in GENERATION_PROFILES`.
     if purpose not in GENERATION_PROFILES:
-        raise ValueError(
-            f"Unsupported generation purpose: {purpose}"
-        )
+        raise ValueError(f"Unsupported generation purpose: {purpose}")
 
     return GENERATION_PROFILES[purpose].copy()
 
 
+# Optional Qwen3 thinking-mode configuration.
 def get_nrp_extra_body(model):
-    """
-    Optional Qwen3 thinking-mode configuration.
 
-    Enable only when supported by the NRP endpoint.
-    """
+    disable_thinking = os.getenv("NRP_DISABLE_THINKING", "0") == "1"
 
-    disable_thinking = (
-        os.getenv("NRP_DISABLE_THINKING", "0") == "1"
-    )
-
+    # Return the selected result when `disable_thinking and 'qwen3' in model.lower()`.
     if disable_thinking and "qwen3" in model.lower():
         return {
             "chat_template_kwargs": {
@@ -55,8 +50,10 @@ def get_nrp_extra_body(model):
 
     return {}
 
+
+# Return model config.
 def get_model_config():
-    # Determine the LLM provider from the environment, defaulting to NRP if not specified.  
+    # Determine the LLM provider from the environment, defaulting to NRP if not specified.
     provider = os.getenv("LLM_PROVIDER", "nrp").lower()
     # Ollama and NRP are the currently supported providers.
     if provider == "ollama":
@@ -91,6 +88,7 @@ def get_model_config():
     raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
+# Return client.
 def get_client():
     config = get_model_config()
 
@@ -101,6 +99,8 @@ def get_client():
         max_retries=0,
     )
 
+
+# Build an analysis response from the model output and dataset context.
 def generate_response(
     messages,
     *,
@@ -135,10 +135,7 @@ def generate_response(
         f"Messages: {len(messages)}",
     )
 
-    prompt_chars = sum(
-        len(str(message.get("content", "")))
-        for message in messages
-    )
+    prompt_chars = sum(len(str(message.get("content", ""))) for message in messages)
 
     debug_log(
         "LLM",
@@ -166,12 +163,9 @@ def generate_response(
     )
 
     try:
+        # Update `url` when `provider == 'ollama'`.
         if provider == "ollama":
-            url = (
-                config["base_url"]
-                .rstrip("/")
-                .removesuffix("/v1")
-            )
+            url = config["base_url"].rstrip("/").removesuffix("/v1")
 
             url += "/api/chat"
 
@@ -225,9 +219,7 @@ def generate_response(
 
             data = response.json()
 
-            content = data.get(
-                "message", {}
-            ).get("content", "").strip()
+            content = data.get("message", {}).get("content", "").strip()
 
             # Preserve existing debug statements.
             print(
@@ -247,6 +239,7 @@ def generate_response(
                 f"Response characters: {len(content)}",
             )
 
+            # Process each `field` from `('total_duration', 'load_duration', 'prompt_eval_duration', 'eval_duration')`.
             for field in (
                 "total_duration",
                 "load_duration",
@@ -255,6 +248,7 @@ def generate_response(
             ):
                 value = data.get(field)
 
+                # Call `debug_log` when `isinstance(value, (int, float))`.
                 if isinstance(value, (int, float)):
                     debug_log(
                         "OLLAMA",
@@ -271,9 +265,7 @@ def generate_response(
 
         client = get_client()
 
-        extra_body = get_nrp_extra_body(
-            config["model"]
-        )
+        extra_body = get_nrp_extra_body(config["model"])
 
         request_options = {
             "model": config["model"],
@@ -283,6 +275,7 @@ def generate_response(
             "max_tokens": settings["max_tokens"],
         }
 
+        # Update `request_options['extra_body']` when `extra_body`.
         if extra_body:
             request_options["extra_body"] = extra_body
 
@@ -291,6 +284,7 @@ def generate_response(
                 "Requesting disabled Qwen3 thinking mode",
             )
 
+        # Call `debug_log` when no earlier condition matches.
         else:
             debug_log(
                 "NRP SETTINGS",
@@ -314,9 +308,7 @@ def generate_response(
                 "Sending chat completion request",
             )
 
-            response = client.chat.completions.create(
-                **request_options
-            )
+            response = client.chat.completions.create(**request_options)
 
             debug_log(
                 "NRP",
@@ -334,8 +326,7 @@ def generate_response(
 
             debug_log(
                 "NRP",
-                f"Finish reason: "
-                f"{getattr(choice, 'finish_reason', None)}",
+                f"Finish reason: " f"{getattr(choice, 'finish_reason', None)}",
             )
 
             debug_log(
@@ -345,7 +336,9 @@ def generate_response(
 
             usage = getattr(response, "usage", None)
 
+            # Process each item from `('prompt_tokens', 'completion_tokens', 'total_tokens')` when `usage is not None`.
             if usage is not None:
+                # Process each `field` from `('prompt_tokens', 'completion_tokens', 'total_tokens')`.
                 for field in (
                     "prompt_tokens",
                     "completion_tokens",
@@ -353,6 +346,7 @@ def generate_response(
                 ):
                     value = getattr(usage, field, None)
 
+                    # Call `debug_log` when `isinstance(value, int)`.
                     if isinstance(value, int):
                         debug_log(
                             "TOKENS",
@@ -371,17 +365,20 @@ def generate_response(
                     None,
                 )
 
+                # Call `debug_log` when `isinstance(reasoning_tokens, int)`.
                 if isinstance(reasoning_tokens, int):
                     debug_log(
                         "TOKENS",
                         f"Reasoning tokens: {reasoning_tokens:,}",
                     )
+                # Call `debug_log` when no earlier condition matches.
                 else:
                     debug_log(
                         "TOKENS",
                         "Reasoning token count not reported",
                     )
 
+            # Call `debug_log` when no earlier condition matches.
             else:
                 debug_log(
                     "TOKENS",
@@ -394,13 +391,14 @@ def generate_response(
                 None,
             )
 
+            # Call `debug_log` when `isinstance(reasoning_content, str)`.
             if isinstance(reasoning_content, str):
                 debug_log(
                     "NRP",
-                    f"Separate reasoning characters: "
-                    f"{len(reasoning_content):,}",
+                    f"Separate reasoning characters: " f"{len(reasoning_content):,}",
                 )
 
+            # Call `debug_log` when `getattr(choice, 'finish_reason', None) == 'length'`.
             if getattr(choice, "finish_reason", None) == "length":
                 debug_log(
                     "LLM WARNING",
@@ -408,6 +406,7 @@ def generate_response(
                     "response may be incomplete",
                 )
 
+                # Call `debug_log` when `purpose == 'code'`.
                 if purpose == "code":
                     # The runner already handles empty code by
                     # requesting a corrected response.
@@ -431,12 +430,12 @@ def generate_response(
     except Exception as exc:
         debug_log(
             "LLM ERROR",
-            f"Provider: {provider} | "
-            f"Exception: {type(exc).__name__}",
+            f"Provider: {provider} | " f"Exception: {type(exc).__name__}",
         )
 
         status = getattr(exc, "status_code", None)
 
+        # Call `debug_log` when `status is not None`.
         if status is not None:
             debug_log(
                 "LLM ERROR",

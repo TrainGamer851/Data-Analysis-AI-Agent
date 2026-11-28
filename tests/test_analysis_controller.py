@@ -1,5 +1,3 @@
-"""Tests for analysis cancellation and timeout management."""
-
 import json
 import subprocess
 import sys
@@ -16,9 +14,9 @@ from agent.analysis_controller import (
 )
 
 
+# Replace the analysis worker with a controlled subprocess.
 @pytest.fixture
 def fake_worker(monkeypatch):
-    """Replace the analysis worker with a controlled subprocess."""
 
     original_popen = subprocess.Popen
     processes = []
@@ -29,7 +27,9 @@ def fake_worker(monkeypatch):
         "returncode": 0,
     }
 
+    # Start a mock worker process and capture its launch arguments.
     def launch(args, **kwargs):
+        # Return the selected result when `'agent.analysis_controller' not in args`.
         if "agent.analysis_controller" not in args:
             return original_popen(args, **kwargs)
 
@@ -76,11 +76,13 @@ def fake_worker(monkeypatch):
 
     # Prevent leftover test processes.
     for process in processes:
+        # Call `process.kill` when `process.poll() is None`.
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
 
 
+# Create the csv file fixture used by the tests.
 @pytest.fixture
 def csv_file(tmp_path):
     path = tmp_path / "orders.csv"
@@ -92,12 +94,15 @@ def csv_file(tmp_path):
 # Job state
 # ------------------------------------------------------------
 
+
+# Verify that job initially not cancelled.
 def test_job_initially_not_cancelled():
     job = AnalysisJob()
 
     assert job.cancelled is False
 
 
+# Verify that job can be cancelled.
 def test_job_can_be_cancelled():
     job = AnalysisJob()
     job.cancel()
@@ -105,6 +110,7 @@ def test_job_can_be_cancelled():
     assert job.cancelled is True
 
 
+# Verify that jobs have unique ids.
 def test_jobs_have_unique_ids():
     first = AnalysisJob()
     second = AnalysisJob()
@@ -116,6 +122,8 @@ def test_jobs_have_unique_ids():
 # Successful analysis
 # ------------------------------------------------------------
 
+
+# Verify that successful analysis.
 def test_successful_analysis(fake_worker, csv_file):
     result = run_controlled_analysis(
         csv_file,
@@ -134,6 +142,8 @@ def test_successful_analysis(fake_worker, csv_file):
 # Cancellation
 # ------------------------------------------------------------
 
+
+# Verify that cancel before start.
 def test_cancel_before_start(fake_worker, csv_file):
     _, processes, _ = fake_worker
 
@@ -151,6 +161,7 @@ def test_cancel_before_start(fake_worker, csv_file):
     assert processes == []
 
 
+# Verify that cancel running analysis.
 def test_cancel_running_analysis(fake_worker, csv_file):
     config, processes, started = fake_worker
     config["delay"] = 30
@@ -186,6 +197,8 @@ def test_cancel_running_analysis(fake_worker, csv_file):
 # Timeout
 # ------------------------------------------------------------
 
+
+# Verify that analysis timeout.
 def test_analysis_timeout(fake_worker, csv_file):
     config, processes, _ = fake_worker
     config["delay"] = 30
@@ -205,6 +218,8 @@ def test_analysis_timeout(fake_worker, csv_file):
 # Process failure
 # ------------------------------------------------------------
 
+
+# Verify that worker failure.
 def test_worker_failure(fake_worker, csv_file):
     config, _, _ = fake_worker
     config["returncode"] = 1
@@ -223,6 +238,8 @@ def test_worker_failure(fake_worker, csv_file):
 # Slot management
 # ------------------------------------------------------------
 
+
+# Verify that slot released after timeout.
 def test_slot_released_after_timeout(
     fake_worker,
     csv_file,
@@ -259,6 +276,7 @@ def test_slot_released_after_timeout(
     assert second["answer"] == "300.0"
 
 
+# Verify that slot released after cancellation.
 def test_slot_released_after_cancellation(
     fake_worker,
     csv_file,
@@ -310,17 +328,22 @@ def test_slot_released_after_cancellation(
     assert second["error"] is None
     assert second["answer"] == "300.0"
 
+
 # ------------------------------------------------------------
 # Docker cleanup
 # ------------------------------------------------------------
 
+
+# Verify that docker cleanup removes only matching containers.
 def test_docker_cleanup_removes_only_matching_containers(monkeypatch):
     job = AnalysisJob()
     calls = []
 
+    # Return a controlled subprocess result for the test.
     def fake_run(args, **kwargs):
         calls.append(args)
 
+        # Return the selected result when `args[1] == 'ps'`.
         if args[1] == "ps":
             return subprocess.CompletedProcess(
                 args,
@@ -356,9 +379,11 @@ def test_docker_cleanup_removes_only_matching_containers(monkeypatch):
     ]
 
 
+# Verify that docker cleanup without containers.
 def test_docker_cleanup_without_containers(monkeypatch):
     calls = []
 
+    # Return a controlled subprocess result for the test.
     def fake_run(args, **kwargs):
         calls.append(args)
 
@@ -380,7 +405,9 @@ def test_docker_cleanup_without_containers(monkeypatch):
     assert calls[0][1] == "ps"
 
 
+# Verify that docker cleanup handles unavailable docker.
 def test_docker_cleanup_handles_unavailable_docker(monkeypatch):
+    # Return a controlled subprocess result for the test.
     def fake_run(*args, **kwargs):
         raise FileNotFoundError("Docker is unavailable")
 
@@ -394,6 +421,7 @@ def test_docker_cleanup_handles_unavailable_docker(monkeypatch):
     controller.cleanup_docker(AnalysisJob().job_id)
 
 
+# Verify that docker cleanup called after timeout.
 def test_docker_cleanup_called_after_timeout(fake_worker, csv_file, monkeypatch):
     config, _, _ = fake_worker
     config["delay"] = 30
@@ -418,6 +446,7 @@ def test_docker_cleanup_called_after_timeout(fake_worker, csv_file, monkeypatch)
     assert cleaned_jobs == [job.job_id]
 
 
+# Verify that docker cleanup called after cancellation.
 def test_docker_cleanup_called_after_cancellation(
     fake_worker,
     csv_file,
@@ -459,6 +488,8 @@ def test_docker_cleanup_called_after_cancellation(
     assert results[0]["error"] == "Analysis stopped."
     assert cleaned_jobs == [job.job_id]
 
+
+# Verify that context serialized to worker.
 def test_context_serialized_to_worker(
     monkeypatch,
     fake_worker,
@@ -468,17 +499,13 @@ def test_context_serialized_to_worker(
 
     original_popen = controller.subprocess.Popen
 
+    # Inspect request.
     def inspect_request(args, **kwargs):
+        # Update `request_path` when `'agent.analysis_controller' in args`.
         if "agent.analysis_controller" in args:
             request_path = Path(args[-2])
 
-            captured.update(
-                json.loads(
-                    request_path.read_text(
-                        encoding="utf-8"
-                    )
-                )
-            )
+            captured.update(json.loads(request_path.read_text(encoding="utf-8")))
 
         return original_popen(args, **kwargs)
 
@@ -511,11 +538,13 @@ def test_context_serialized_to_worker(
     assert captured["context"] == context
 
 
+# Verify that worker forwards context.
 def test_worker_forwards_context(monkeypatch, tmp_path):
     import agent.agent_runner as runner
 
     captured = {}
 
+    # Return a controlled analysis result for the test.
     def fake_analysis(csv_path, question, **kwargs):
         captured.update(kwargs)
 
@@ -546,12 +575,14 @@ def test_worker_forwards_context(monkeypatch, tmp_path):
     ]
 
     request_path.write_text(
-        json.dumps({
-            "csv_path": "orders.csv",
-            "question": "What about profit?",
-            "explain": True,
-            "context": context,
-        }),
+        json.dumps(
+            {
+                "csv_path": "orders.csv",
+                "question": "What about profit?",
+                "explain": True,
+                "context": context,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -564,6 +595,7 @@ def test_worker_forwards_context(monkeypatch, tmp_path):
     assert result_path.exists()
 
 
+# Verify that controller passes deadline to worker.
 def test_controller_passes_deadline_to_worker(
     fake_worker,
     csv_file,
@@ -574,7 +606,9 @@ def test_controller_passes_deadline_to_worker(
     original_popen = controller.subprocess.Popen
     captured = {}
 
+    # Capture subprocess arguments and return a mock process.
     def capture_popen(args, **kwargs):
+        # Update `captured` when `'agent.analysis_controller' in args`.
         if "agent.analysis_controller" in args:
             captured.update(kwargs["env"])
 

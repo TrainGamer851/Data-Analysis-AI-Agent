@@ -8,6 +8,7 @@ from agent.data_quality import (
 )
 
 
+# Verify that numeric compatibility.
 @pytest.mark.parametrize(
     "values, expected",
     [
@@ -27,63 +28,55 @@ from agent.data_quality import (
     ],
 )
 def test_numeric_compatibility(values, expected):
-    quality = inspect_numeric_values(
-        pd.Series(values)
-    )
+    quality = inspect_numeric_values(pd.Series(values))
 
     assert quality["numeric_compatibility"] == expected
 
 
+# Verify that partial numeric counts.
 def test_partial_numeric_counts():
-    quality = inspect_numeric_values(
-        pd.Series(["100", "unknown", "200", None])
-    )
+    quality = inspect_numeric_values(pd.Series(["100", "unknown", "200", None]))
 
     assert quality["non_missing_count"] == 3
     assert quality["numeric_count"] == 2
     assert quality["invalid_numeric_count"] == 1
 
 
+# Verify that nonfinite values.
 def test_nonfinite_values():
-    quality = inspect_numeric_values(
-        pd.Series([100, float("inf"), float("-inf")])
-    )
+    quality = inspect_numeric_values(pd.Series([100, float("inf"), float("-inf")]))
 
     assert quality["numeric_count"] == 1
     assert quality["nonfinite_count"] == 2
     assert quality["invalid_numeric_count"] == 2
 
 
+# Verify that invalid thousands separator.
 def test_invalid_thousands_separator():
-    quality = inspect_numeric_values(
-        pd.Series(["1,00", "100"])
-    )
+    quality = inspect_numeric_values(pd.Series(["1,00", "100"]))
 
     assert quality["numeric_count"] == 1
     assert quality["invalid_numeric_count"] == 1
 
 
+# Verify that dollar symbol not assumed usd.
 def test_dollar_symbol_not_assumed_usd():
-    quality = inspect_numeric_values(
-        pd.Series(["$100", "$200"])
-    )
+    quality = inspect_numeric_values(pd.Series(["$100", "$200"]))
 
-    assert quality["currency_hints"] == [
-        "dollar_symbol"
-    ]
+    assert quality["currency_hints"] == ["dollar_symbol"]
 
 
+# Verify that multiple currency markers.
 def test_multiple_currency_markers():
     quality = inspect_column_quality(
         pd.Series(["$100", "€200"]),
         business_concepts=["revenue"],
     )
 
-    assert "multiple_currency_markers" in (
-        quality["warnings"]
-    )
+    assert "multiple_currency_markers" in (quality["warnings"])
 
 
+# Verify that currency header conflict.
 def test_currency_header_conflict():
     quality = inspect_column_quality(
         pd.Series(["EUR 100", "EUR 200"]),
@@ -91,33 +84,30 @@ def test_currency_header_conflict():
         unit_hint="USD",
     )
 
-    assert "currency_header_value_conflict" in (
-        quality["warnings"]
-    )
+    assert "currency_header_value_conflict" in (quality["warnings"])
 
 
+# Verify that mixed percentage notation.
 def test_mixed_percentage_notation():
     quality = inspect_column_quality(
         pd.Series(["10%", "0.20"]),
         business_concepts=["discount"],
     )
 
-    assert "mixed_percentage_notation" in (
-        quality["warnings"]
-    )
+    assert "mixed_percentage_notation" in (quality["warnings"])
 
 
+# Verify that numeric text warning.
 def test_numeric_text_warning():
     quality = inspect_column_quality(
         pd.Series(["100", "200"]),
         business_concepts=["revenue"],
     )
 
-    assert "numeric_conversion_required" in (
-        quality["warnings"]
-    )
+    assert "numeric_conversion_required" in (quality["warnings"])
 
 
+# Verify that all values missing warning.
 def test_all_values_missing_warning():
     quality = inspect_column_quality(
         pd.Series([None, None]),
@@ -127,6 +117,7 @@ def test_all_values_missing_warning():
     assert "all_values_missing" in quality["warnings"]
 
 
+# Verify that date conventions.
 @pytest.mark.parametrize(
     "values, expected",
     [
@@ -169,33 +160,30 @@ def test_all_values_missing_warning():
     ],
 )
 def test_date_conventions(values, expected):
-    assert inspect_date_convention(
-        pd.Series(values)
-    ) == expected
+    assert inspect_date_convention(pd.Series(values)) == expected
 
 
+# Verify that ambiguous date warning.
 def test_ambiguous_date_warning():
     quality = inspect_column_quality(
         pd.Series(["01/02/2026", "03/04/2026"]),
         business_concepts=["order_date"],
     )
 
-    assert "ambiguous_date_convention" in (
-        quality["warnings"]
-    )
+    assert "ambiguous_date_convention" in (quality["warnings"])
 
 
+# Verify that mixed discount scale.
 def test_mixed_discount_scale():
     quality = inspect_column_quality(
         pd.Series([0.15, 20]),
         business_concepts=["discount"],
     )
 
-    assert "potentially_mixed_discount_scale" in (
-        quality["warnings"]
-    )
+    assert "potentially_mixed_discount_scale" in (quality["warnings"])
 
 
+# Verify that explicit discount percentage.
 def test_explicit_discount_percentage():
     quality = inspect_column_quality(
         pd.Series([0.15, 20]),
@@ -203,11 +191,10 @@ def test_explicit_discount_percentage():
         unit_hint="percentage",
     )
 
-    assert "potentially_mixed_discount_scale" not in (
-        quality["warnings"]
-    )
+    assert "potentially_mixed_discount_scale" not in (quality["warnings"])
 
 
+# Verify that invalid discount ratio.
 def test_invalid_discount_ratio():
     quality = inspect_column_quality(
         pd.Series([0.15, 20]),
@@ -215,28 +202,28 @@ def test_invalid_discount_ratio():
         unit_hint="ratio",
     )
 
-    assert "discount_ratio_above_one" in (
-        quality["warnings"]
-    )
+    assert "discount_ratio_above_one" in (quality["warnings"])
 
 
+# Verify that discount outside expected range.
 def test_discount_outside_expected_range():
     quality = inspect_column_quality(
         pd.Series([-10, 120]),
         business_concepts=["discount"],
     )
 
-    assert "discount_outside_expected_range" in (
-        quality["warnings"]
-    )
+    assert "discount_outside_expected_range" in (quality["warnings"])
 
 
+# Verify that original series not modified.
 def test_original_series_not_modified():
-    series = pd.Series([
-        "$1,000",
-        "unknown",
-        "(200)",
-    ])
+    series = pd.Series(
+        [
+            "$1,000",
+            "unknown",
+            "(200)",
+        ]
+    )
 
     original = series.copy(deep=True)
 

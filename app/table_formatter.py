@@ -11,7 +11,6 @@ from agent.currency_units import (
 
 from agent.debug_logger import debug_log, DebugTimer
 
-
 MONEY_COLUMNS = {
     "sales",
     "total sales",
@@ -153,6 +152,7 @@ COUNT_COLUMNS = {
 }
 
 
+# Normalize a column label into lowercase words and standardize percent notation.
 def normalize_column(column):
     name = str(column).lower().strip()
     name = name.replace("_", " ")
@@ -162,11 +162,12 @@ def normalize_column(column):
     return name.strip()
 
 
+# Classify a column for display using its label, business meaning, and currency suffix.
 def get_column_type(column):
-    """Identify the display type using the column name."""
 
     name = normalize_column(column)
 
+    # Treat date parts, IDs, and postal codes as identifiers so they are not formatted as measurements.
     if (
         name in {"year", "month", "day", "quarter"}
         or name.endswith((" year", " month", " day", " quarter"))
@@ -176,6 +177,7 @@ def get_column_type(column):
     ):
         return "identifier"
 
+    # Recognize percentage labels and suffixes before applying general numeric formatting.
     if (
         name in PERCENTAGE_COLUMNS
         or name.endswith(" pct")
@@ -184,9 +186,11 @@ def get_column_type(column):
     ):
         return "percentage"
 
+    # Keep correlation coefficients distinct from percentages and monetary values.
     if "correlation" in name:
         return "correlation"
 
+    # Keep discount values at their original scale instead of assuming they are percentages.
     if name in {
         "discount",
         "avg discount",
@@ -201,43 +205,53 @@ def get_column_type(column):
     # traditional monetary column names.
     currency = get_explicit_currency(column)
 
+    # Prefer an explicit currency suffix so display formatting preserves the dataset's stated unit.
     if currency is not None:
         return f"money:{currency}"
 
+    # Use monetary formatting for recognized financial fields without explicit currency suffixes.
     if name in MONEY_COLUMNS:
         return "money"
 
+    # Use count formatting for known quantity and record-count fields.
     if name in COUNT_COLUMNS:
         return "count"
 
     return "number"
 
 
+# Format one finite value according to its display type while preserving its units and meaning.
 def format_value(value, column_type):
-    """Format a single value without changing its meaning."""
 
+    # Show missing values with the unavailable-value marker rather than formatting them as zero.
     if value is None or value is pd.NA:
         return "—"
 
+    # Preserve booleans as text because Python treats them as numeric subclasses.
     if isinstance(value, bool):
         return str(value)
 
+    # Leave strings and other nonnumeric values unchanged instead of coercing user data.
     if not isinstance(value, Real):
         return str(value)
 
+    # Hide infinite and NaN results rather than presenting misleading numeric values.
     if not math.isfinite(value):
         return "—"
 
+    # Keep identifier formatting separate so numeric-looking IDs retain their original representation.
     if column_type == "identifier":
+        # Preserve whole-number identifiers as plain strings without numeric separators.
         if isinstance(value, Integral):
             return str(value)
 
+        # Remove a redundant decimal portion when an identifier represents a whole number.
         if float(value).is_integer():
             return str(int(value))
 
         return str(value)
 
-    # Format explicitly identified currencies.
+    # Format values using the explicit currency code inferred from the column name.
     if column_type.startswith("money:"):
         currency = column_type.split(":", 1)[1]
 
@@ -246,37 +260,42 @@ def format_value(value, column_type):
             currency,
         )
 
-    # Preserve historical dollar formatting for
-    # monetary columns without explicit currency units.
+    # Retain the application's legacy USD display for monetary columns without a stated unit.
     if column_type == "money":
         return format_currency(
             value,
             "USD",
         )
 
+    # Display percentage metrics with a percent sign and two decimal places.
     if column_type == "percentage":
         return f"{value:,.2f}%"
 
+    # Display correlation coefficients to four decimal places without a percent sign.
     if column_type == "correlation":
         return f"{value:.4f}"
 
+    # Preserve discount ratios to four decimal places without converting their scale.
     if column_type == "discount_value":
         return f"{value:,.4f}"
 
+    # Format whole counts with grouping separators and retain decimals for fractional counts.
     if column_type == "count":
+        # Format whole counts as integers with grouping separators when they have no fractional part.
         if float(value).is_integer():
             return f"{int(value):,}"
 
         return f"{value:,.2f}"
 
+    # Add grouping separators to whole numbers while omitting unnecessary decimal places.
     if isinstance(value, Integral):
         return f"{value:,}"
 
     return f"{value:,.2f}"
 
 
+# Format a copy of the dataframe's values for display without modifying the input.
 def format_business_table(df):
-    """Return a formatted copy for display purposes only."""
 
     timer = DebugTimer("TABLE FORMAT")
 
@@ -289,22 +308,22 @@ def format_business_table(df):
 
     formatted = df.copy()
 
+    # Format every copied dataframe column according to its inferred display type.
     for column in formatted.columns:
         column_type = get_column_type(column)
 
         debug_log(
             "TABLE FORMAT",
-            f"Column: {column} | "
-            f"Display type: {column_type}",
+            f"Column: {column} | " f"Display type: {column_type}",
         )
 
+        # Log the explicit unit used for this column before formatting its values.
         if column_type.startswith("money:"):
             currency = column_type.split(":", 1)[1]
 
             debug_log(
                 "TABLE FORMAT",
-                f"Explicit currency detected: {currency} | "
-                f"Column: {column}",
+                f"Explicit currency detected: {currency} | " f"Column: {column}",
             )
 
         formatted[column] = formatted[column].map(
@@ -314,15 +333,13 @@ def format_business_table(df):
             )
         )
 
-    timer.finish(
-        "Business table formatting completed"
-    )
+    timer.finish("Business table formatting completed")
 
     return formatted
 
 
+# Convert a technical column name into a readable label with a percent sign where appropriate.
 def clean_column_header(column):
-    """Convert technical column names into readable labels."""
 
     name = str(column).replace("_", " ")
     name = re.sub(r"\s+", " ", name).strip()
@@ -339,9 +356,10 @@ def clean_column_header(column):
     return name
 
 
+# Format dataframe values, escape Markdown-sensitive text, and render a display-ready table.
 def business_table_to_markdown(df):
-    """Convert formatted business data into a Markdown table."""
 
+    # Collapse cell whitespace and escape Markdown characters so values cannot alter table layout.
     def escape_cell(value):
         text = " ".join(str(value).split())
 
@@ -354,14 +372,12 @@ def business_table_to_markdown(df):
     formatted = format_business_table(df)
 
     formatted.columns = [
-        escape_cell(clean_column_header(column))
-        for column in formatted.columns
+        escape_cell(clean_column_header(column)) for column in formatted.columns
     ]
 
+    # Escape every formatted cell before rendering the Markdown table.
     for column in formatted.columns:
-        formatted[column] = formatted[column].map(
-            escape_cell
-        )
+        formatted[column] = formatted[column].map(escape_cell)
 
     return formatted.to_markdown(
         index=False,

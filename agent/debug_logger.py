@@ -5,26 +5,17 @@ import threading
 from datetime import datetime
 from time import perf_counter
 
-
 _print_lock = threading.Lock()
 
 
+# Print a timestamped execution-stage message.
 def debug_log(stage, message, *, job_id=None):
-    """Print a timestamped execution-stage message."""
 
-    timestamp = datetime.now().strftime(
-        "%H:%M:%S.%f"
-    )[:-3]
+    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
-    job_id = job_id or os.environ.get(
-        "ANALYSIS_JOB_ID"
-    )
+    job_id = job_id or os.environ.get("ANALYSIS_JOB_ID")
 
-    job_label = (
-        f" [JOB:{str(job_id)[:8]}]"
-        if job_id
-        else ""
-    )
+    job_label = f" [JOB:{str(job_id)[:8]}]" if job_id else ""
 
     # Remove terminal control characters.
     safe_message = re.sub(
@@ -35,8 +26,7 @@ def debug_log(stage, message, *, job_id=None):
 
     with _print_lock:
         print(
-            f"[{timestamp}]{job_label} "
-            f"[{stage.upper()}] {safe_message}",
+            f"[{timestamp}]{job_label} " f"[{stage.upper()}] {safe_message}",
             flush=True,
         )
 
@@ -44,14 +34,17 @@ def debug_log(stage, message, *, job_id=None):
 class DebugTimer:
     """Measure execution duration for an analysis stage."""
 
+    # Initialize the object and store its starting state.
     def __init__(self, stage, *, job_id=None):
         self.stage = stage
         self.job_id = job_id
         self.started = perf_counter()
 
+    # Return the elapsed time since the timer started.
     def elapsed(self):
         return perf_counter() - self.started
 
+    # Stop the timer and record its final duration.
     def finish(self, message="Completed"):
         duration = self.elapsed()
 

@@ -1,6 +1,3 @@
-
-"""Tests for the Business Data Analysis Agent's Gradio interface."""
-
 from pathlib import Path
 
 import pandas as pd
@@ -18,19 +15,19 @@ from app.app import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CSV_FILE = PROJECT_ROOT / "data" / "superstore_orders.csv"
 
-
 # ---------------------------------------------------------
 # Dataset loading tests
 # ---------------------------------------------------------
 
+
+# Verify that the sample Superstore dataset exists.
 def test_csv_exists():
-    """Verify that the sample Superstore dataset exists."""
     assert CSV_FILE.exists(), f"CSV file not found at {CSV_FILE}"
     assert CSV_FILE.is_file()
 
 
+# Verify successful CSV loading and dataset statistics.
 def test_csv_loads():
-    """Verify successful CSV loading and dataset statistics."""
     preview, status, rows, columns, csv_path = load_csv(str(CSV_FILE))
 
     assert isinstance(preview, pd.DataFrame)
@@ -44,8 +41,8 @@ def test_csv_loads():
     assert columns == "21"
 
 
+# Verify that the dataset preview contains business metrics.
 def test_csv_preview():
-    """Verify that the dataset preview contains business metrics."""
     preview, _, _, _, _ = load_csv(str(CSV_FILE))
 
     assert len(preview) == 100
@@ -61,8 +58,8 @@ def test_csv_preview():
     assert expected_columns.issubset(set(preview.columns))
 
 
+# Verify the UI handles a missing CSV upload gracefully.
 def test_no_file_uploaded():
-    """Verify the UI handles a missing CSV upload gracefully."""
     preview, status, rows, columns, full_df = load_csv(None)
 
     assert preview.empty
@@ -72,8 +69,8 @@ def test_no_file_uploaded():
     assert columns == ""
 
 
+# Verify that an empty CSV is rejected gracefully.
 def test_empty_csv(tmp_path):
-    """Verify that an empty CSV is rejected gracefully."""
     csv_path = tmp_path / "empty.csv"
     csv_path.write_text("Sales,Profit\n", encoding="utf-8")
 
@@ -86,8 +83,8 @@ def test_empty_csv(tmp_path):
     assert columns == ""
 
 
+# Verify that a nonexistent file produces an error message.
 def test_invalid_csv_path():
-    """Verify that a nonexistent file produces an error message."""
     preview, status, rows, columns, full_df = load_csv(
         str(PROJECT_ROOT / "data" / "missing_file.csv")
     )
@@ -103,6 +100,8 @@ def test_invalid_csv_path():
 # Business analysis interface tests
 # ---------------------------------------------------------
 
+
+# Verify that question without dataset.
 def test_question_without_dataset():
     response = analyze_question(
         "What is the total sales?",
@@ -111,13 +110,17 @@ def test_question_without_dataset():
 
     assert response == "Please upload a CSV file first."
 
+
+# Verify that empty question.
 def test_empty_question():
     response = analyze_question("", str(CSV_FILE))
 
     assert response == "Please enter a question about your dataset."
 
 
+# Verify that analysis backend.
 def test_analysis_backend(monkeypatch):
+    # Return a controlled analysis result for the test.
     def fake_analysis(
         csv_path,
         question,
@@ -151,6 +154,8 @@ def test_analysis_backend(monkeypatch):
 # Chat history tests
 # ---------------------------------------------------------
 
+
+# Verify that send message.
 def test_send_message(monkeypatch):
     monkeypatch.setattr(
         "app.app.run_analysis",
@@ -182,11 +187,14 @@ def test_send_message(monkeypatch):
     assert cleared_input == ""
 
 
+# Verify that chat history preserved.
 def test_chat_history_preserved(monkeypatch):
-    answers = iter([
-        "Total sales are $300.00.",
-        "Total profit is $50.00.",
-    ])
+    answers = iter(
+        [
+            "Total sales are $300.00.",
+            "Total profit is $50.00.",
+        ]
+    )
 
     monkeypatch.setattr(
         "app.app.run_analysis",
@@ -220,6 +228,7 @@ def test_chat_history_preserved(monkeypatch):
     assert updated_history[3]["role"] == "assistant"
 
 
+# Verify that empty chat message.
 def test_empty_chat_message():
     history, cleared_input = send_message(
         "   ",
@@ -231,8 +240,8 @@ def test_empty_chat_message():
     assert cleared_input == ""
 
 
+# Verify that the chatbot requests a dataset when none is loaded.
 def test_chat_without_dataset():
-    """Verify that the chatbot requests a dataset when none is loaded."""
     history, _ = send_message(
         "Which category has the highest profit?",
         [],
@@ -248,9 +257,11 @@ def test_chat_without_dataset():
 # Dataset and conversation reset tests
 # ---------------------------------------------------------
 
+
+# Verify that load dataset resets chat.
 def test_load_dataset_resets_chat():
-    preview, status, rows, columns, csv_path, history = (
-        load_csv_and_reset_chat(str(CSV_FILE))
+    preview, status, rows, columns, csv_path, history = load_csv_and_reset_chat(
+        str(CSV_FILE)
     )
 
     assert status == "CSV file loaded successfully!"
@@ -261,15 +272,15 @@ def test_load_dataset_resets_chat():
     assert history == []
 
 
+# Verify that missing dataset resets chat.
 def test_missing_dataset_resets_chat():
-    preview, status, rows, columns, csv_path, history = (
-        load_csv_and_reset_chat(None)
-    )
+    preview, status, rows, columns, csv_path, history = load_csv_and_reset_chat(None)
 
     assert preview.empty
     assert csv_path is None
     assert history == []
     assert status == "Please upload a CSV file first."
+
 
 # ------------------------------------------------------------
 # Frontend cancellation tests
@@ -281,10 +292,9 @@ from unittest.mock import patch
 import app.app as frontend
 
 
+# Verify that controlled message success.
 def test_controlled_message_success():
-    request = SimpleNamespace(
-        session_hash="test-success"
-    )
+    request = SimpleNamespace(session_hash="test-success")
 
     with patch.object(
         frontend,
@@ -308,11 +318,11 @@ def test_controlled_message_success():
     assert request.session_hash not in frontend._active_jobs
 
 
+# Verify that controlled message cancellation.
 def test_controlled_message_cancellation():
-    request = SimpleNamespace(
-        session_hash="test-cancellation"
-    )
+    request = SimpleNamespace(session_hash="test-cancellation")
 
+    # Return a controlled analysis result for the test.
     def fake_analysis(
         question,
         csv_path,
@@ -345,14 +355,11 @@ def test_controlled_message_cancellation():
     assert request.session_hash not in frontend._active_jobs
 
 
+# Verify that cancellation is session specific.
 def test_cancellation_is_session_specific():
-    first_request = SimpleNamespace(
-        session_hash="test-session-one"
-    )
+    first_request = SimpleNamespace(session_hash="test-session-one")
 
-    second_request = SimpleNamespace(
-        session_hash="test-session-two"
-    )
+    second_request = SimpleNamespace(session_hash="test-session-two")
 
     first_job = frontend.AnalysisJob()
     second_job = frontend.AnalysisJob()
@@ -369,28 +376,22 @@ def test_cancellation_is_session_specific():
 
     finally:
         with frontend._jobs_lock:
-            frontend._active_jobs.pop(
-                first_request.session_hash, None
-            )
-            frontend._active_jobs.pop(
-                second_request.session_hash, None
-            )
+            frontend._active_jobs.pop(first_request.session_hash, None)
+            frontend._active_jobs.pop(second_request.session_hash, None)
 
 
+# Verify that cancel without active job.
 def test_cancel_without_active_job():
-    request = SimpleNamespace(
-        session_hash="test-no-active-job"
-    )
+    request = SimpleNamespace(session_hash="test-no-active-job")
 
     frontend.cancel_active_analysis(request)
 
     assert request.session_hash not in frontend._active_jobs
 
 
+# Verify that controlled message rejects duplicate job.
 def test_controlled_message_rejects_duplicate_job():
-    request = SimpleNamespace(
-        session_hash="test-duplicate-job"
-    )
+    request = SimpleNamespace(session_hash="test-duplicate-job")
 
     existing_job = frontend.AnalysisJob()
 
@@ -414,17 +415,14 @@ def test_controlled_message_rejects_duplicate_job():
         assert updates == []
         mock_analysis.assert_not_called()
 
-        assert (
-            frontend._active_jobs[request.session_hash]
-            is existing_job
-        )
+        assert frontend._active_jobs[request.session_hash] is existing_job
 
     finally:
         with frontend._jobs_lock:
-            frontend._active_jobs.pop(
-                request.session_hash, None
-            )
+            frontend._active_jobs.pop(request.session_hash, None)
 
+
+# Verify that analysis with chart.
 def test_analysis_with_chart():
     response = {
         "answer": "Profit by category.",
@@ -455,6 +453,7 @@ def test_analysis_with_chart():
     assert figure.data[0].type == "bar"
 
 
+# Verify that analysis without chart.
 def test_analysis_without_chart():
     response = {
         "answer": "Total sales: $1,000.00",
@@ -476,6 +475,7 @@ def test_analysis_without_chart():
     assert figure is None
 
 
+# Verify that chart failure preserves answer.
 def test_chart_failure_preserves_answer():
     response = {
         "answer": "Profit by category.",
@@ -496,11 +496,9 @@ def test_chart_failure_preserves_answer():
             "build_chart",
             side_effect=RuntimeError("Chart failed"),
         ):
-            answer, figure = (
-                frontend.analyze_question_with_chart(
-                    "Show profit by category.",
-                    "orders.csv",
-                )
+            answer, figure = frontend.analyze_question_with_chart(
+                "Show profit by category.",
+                "orders.csv",
             )
 
     assert "Profit by category." in answer
@@ -511,10 +509,10 @@ def test_chart_failure_preserves_answer():
     assert "$200.00" in answer
     assert figure is None
 
+
+# Verify that followup receives previous context.
 def test_followup_receives_previous_context():
-    request = SimpleNamespace(
-        session_hash="test-followup"
-    )
+    request = SimpleNamespace(session_hash="test-followup")
 
     history = [
         {
@@ -545,19 +543,14 @@ def test_followup_receives_previous_context():
     context = mock_analysis.call_args.kwargs["context"]
 
     assert len(context) == 2
-    assert context[1]["content"] == (
-        "West has the highest profit."
-    )
+    assert context[1]["content"] == ("West has the highest profit.")
 
-    assert updates[-1][0][-1]["content"] == (
-        "West exceeds East."
-    )
+    assert updates[-1][0][-1]["content"] == ("West exceeds East.")
 
 
+# Verify that first question has no context.
 def test_first_question_has_no_context():
-    request = SimpleNamespace(
-        session_hash="test-no-context"
-    )
+    request = SimpleNamespace(session_hash="test-no-context")
 
     with patch.object(
         frontend,
@@ -577,10 +570,9 @@ def test_first_question_has_no_context():
     assert mock_analysis.call_args.kwargs["context"] == []
 
 
+# Verify that cancelled turn not sent as context.
 def test_cancelled_turn_not_sent_as_context():
-    request = SimpleNamespace(
-        session_hash="test-cancelled-context"
-    )
+    request = SimpleNamespace(session_hash="test-cancelled-context")
 
     history = [
         {

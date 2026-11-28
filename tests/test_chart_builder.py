@@ -5,6 +5,8 @@ from app.chart_builder import (
     get_chart_currency,
 )
 
+
+# Verify that category profit bar chart.
 def test_category_profit_bar_chart():
     table = [
         {"Category": "Technology", "Profit": 1000},
@@ -17,6 +19,7 @@ def test_category_profit_bar_chart():
     assert figure.data[0].type == "bar"
 
 
+# Verify that annual sales line chart.
 def test_annual_sales_line_chart():
     table = [
         {"Year": 2023, "Sales": 1000},
@@ -29,6 +32,7 @@ def test_annual_sales_line_chart():
     assert figure.data[0].type == "scatter"
 
 
+# Verify that growth bar chart.
 def test_growth_bar_chart():
     table = [
         {"Year": 2023, "Sales Growth %": None},
@@ -42,14 +46,17 @@ def test_growth_bar_chart():
     assert figure.data[0].type == "bar"
 
 
+# Verify that empty table.
 def test_empty_table():
     assert build_chart([]) is None
 
 
+# Verify that missing table.
 def test_missing_table():
     assert build_chart(None) is None
 
 
+# Verify that single row table.
 def test_single_row_table():
     table = [
         {"Category": "Technology", "Profit": 1000},
@@ -58,6 +65,7 @@ def test_single_row_table():
     assert build_chart(table) is None
 
 
+# Verify that text only table.
 def test_text_only_table():
     table = [
         {"Category": "Technology", "Status": "Good"},
@@ -67,6 +75,7 @@ def test_text_only_table():
     assert build_chart(table) is None
 
 
+# Verify that multiple financial metrics.
 def test_multiple_financial_metrics():
     table = [
         {
@@ -86,6 +95,7 @@ def test_multiple_financial_metrics():
     assert len(figure.data) == 2
 
 
+# Verify that incompatible units not combined.
 def test_incompatible_units_not_combined():
     table = [
         {
@@ -105,6 +115,7 @@ def test_incompatible_units_not_combined():
     assert len(figure.data) == 1
 
 
+# Verify that years sorted chronologically.
 def test_years_sorted_chronologically():
     table = [
         {"Year": 2025, "Sales": 1500},
@@ -121,6 +132,7 @@ def test_years_sorted_chronologically():
     ]
 
 
+# Verify that chart preserves calculated values.
 def test_chart_preserves_calculated_values():
     table = [
         {"Region": "West", "Profit": 110798.817},
@@ -135,6 +147,7 @@ def test_chart_preserves_calculated_values():
     ]
 
 
+# Verify that duplicate categories not charted.
 def test_duplicate_categories_not_charted():
     table = [
         {"Category": "Technology", "Profit": 100},
@@ -143,6 +156,8 @@ def test_duplicate_categories_not_charted():
 
     assert build_chart(table) is None
 
+
+# Verify that index column ignored.
 def test_index_column_ignored():
     table = [
         {"index": 3, "Region": "West", "Profit": 1000},
@@ -157,6 +172,7 @@ def test_index_column_ignored():
     assert list(figure.data[0].y) == [1000, 800]
 
 
+# Verify that growth prioritized over sales.
 def test_growth_prioritized_over_sales():
     table = [
         {
@@ -180,6 +196,7 @@ def test_growth_prioritized_over_sales():
     assert figure.layout.yaxis.ticksuffix == "%"
 
 
+# Verify that negative growth color.
 def test_negative_growth_color():
     table = [
         {"Year": 2024, "Sales Growth %": -4.26},
@@ -194,6 +211,7 @@ def test_negative_growth_color():
     ]
 
 
+# Verify that dark chart background.
 def test_dark_chart_background():
     table = [
         {"Region": "West", "Profit": 1000},
@@ -206,6 +224,7 @@ def test_dark_chart_background():
     assert figure.layout.plot_bgcolor == "#111827"
 
 
+# Verify that index only is not charted.
 def test_index_only_is_not_charted():
     table = [
         {"index": 0, "Region": "West"},
@@ -219,6 +238,8 @@ def test_index_only_is_not_charted():
 # Currency-aware chart formatting
 # --------------------------------------------------
 
+
+# Verify that chart currency resolution.
 @pytest.mark.parametrize(
     "column_type, expected",
     [
@@ -242,11 +263,10 @@ def test_chart_currency_resolution(
     column_type,
     expected,
 ):
-    assert get_chart_currency(
-        column_type
-    ) == expected
+    assert get_chart_currency(column_type) == expected
 
 
+# Verify that explicit currency chart.
 @pytest.mark.parametrize(
     "currency, prefix",
     [
@@ -282,9 +302,7 @@ def test_explicit_currency_chart(
     assert figure is not None
     assert len(figure.data) == 1
 
-    assert figure.layout.yaxis.title.text == (
-        f"Amount ({currency})"
-    )
+    assert figure.layout.yaxis.title.text == (f"Amount ({currency})")
 
     assert figure.layout.yaxis.tickprefix == prefix
 
@@ -295,9 +313,7 @@ def test_explicit_currency_chart(
         f"{prefix}8,000.12",
     ]
 
-    assert "%{customdata}" in (
-        figure.data[0].hovertemplate
-    )
+    assert "%{customdata}" in (figure.data[0].hovertemplate)
 
     # Preserve original calculated values.
     assert list(figure.data[0].y) == [
@@ -306,6 +322,7 @@ def test_explicit_currency_chart(
     ]
 
 
+# Verify that negative currency hover.
 def test_negative_currency_hover():
     table = [
         {
@@ -331,6 +348,7 @@ def test_negative_currency_hover():
     ]
 
 
+# Verify that same currency metrics combined.
 def test_same_currency_metrics_combined():
     table = [
         {
@@ -349,11 +367,10 @@ def test_same_currency_metrics_combined():
 
     assert len(figure.data) == 2
 
-    assert figure.layout.yaxis.title.text == (
-        "Amount (EUR)"
-    )
+    assert figure.layout.yaxis.title.text == ("Amount (EUR)")
 
 
+# Verify that different currencies not combined.
 def test_different_currencies_not_combined():
     table = [
         {
@@ -372,9 +389,7 @@ def test_different_currencies_not_combined():
 
     assert len(figure.data) == 1
 
-    assert figure.layout.yaxis.title.text == (
-        "Amount (USD)"
-    )
+    assert figure.layout.yaxis.title.text == ("Amount (USD)")
 
     assert list(figure.data[0].y) == [
         10000,
@@ -382,6 +397,7 @@ def test_different_currencies_not_combined():
     ]
 
 
+# Verify that legacy money chart unchanged.
 def test_legacy_money_chart_unchanged():
     table = [
         {"Region": "West", "Sales": 1000},
@@ -390,9 +406,7 @@ def test_legacy_money_chart_unchanged():
 
     figure = build_chart(table)
 
-    assert figure.layout.yaxis.title.text == (
-        "Amount (USD)"
-    )
+    assert figure.layout.yaxis.title.text == ("Amount (USD)")
 
     assert figure.layout.yaxis.tickprefix == "$"
 
@@ -402,6 +416,7 @@ def test_legacy_money_chart_unchanged():
     ]
 
 
+# Verify that currency annual line chart.
 def test_currency_annual_line_chart():
     table = [
         {"Year": 2025, "Revenue_GBP": 15000},
@@ -428,6 +443,7 @@ def test_currency_annual_line_chart():
     assert figure.layout.yaxis.tickprefix == "£"
 
 
+# Verify that currency missing value hover.
 def test_currency_missing_value_hover():
     table = [
         {"Region": "West", "Revenue_EUR": 1000},
@@ -444,6 +460,7 @@ def test_currency_missing_value_hover():
     ]
 
 
+# Verify that currency and percentage not combined.
 def test_currency_and_percentage_not_combined():
     table = [
         {
@@ -462,11 +479,10 @@ def test_currency_and_percentage_not_combined():
 
     assert len(figure.data) == 1
 
-    assert figure.layout.yaxis.title.text == (
-        "Amount (EUR)"
-    )
+    assert figure.layout.yaxis.title.text == ("Amount (EUR)")
 
 
+# Verify that currency growth priority preserved.
 def test_currency_growth_priority_preserved():
     table = [
         {
@@ -486,13 +502,12 @@ def test_currency_growth_priority_preserved():
     assert len(figure.data) == 1
     assert figure.data[0].type == "bar"
 
-    assert figure.layout.yaxis.title.text == (
-        "Percentage"
-    )
+    assert figure.layout.yaxis.title.text == ("Percentage")
 
     assert figure.layout.yaxis.ticksuffix == "%"
 
 
+# Verify that currency chart preserves input.
 def test_currency_chart_preserves_input():
     table = [
         {
@@ -505,10 +520,7 @@ def test_currency_chart_preserves_input():
         },
     ]
 
-    original = [
-        row.copy()
-        for row in table
-    ]
+    original = [row.copy() for row in table]
 
     build_chart(table)
 
@@ -520,6 +532,7 @@ def test_currency_chart_preserves_input():
 # --------------------------------------------------
 
 
+# Verify that inferred chart dimension.
 @pytest.mark.parametrize(
     "dimension",
     [
@@ -563,6 +576,7 @@ def test_inferred_chart_dimension(dimension):
     assert figure.layout.yaxis.tickprefix == "$"
 
 
+# Verify that department financial chart.
 def test_department_financial_chart():
     table = [
         {
@@ -599,11 +613,10 @@ def test_department_financial_chart():
         750,
     ]
 
-    assert figure.layout.yaxis.title.text == (
-        "Amount (USD)"
-    )
+    assert figure.layout.yaxis.title.text == ("Amount (USD)")
 
 
+# Verify that unfamiliar business dimension chart.
 def test_unfamiliar_business_dimension_chart():
     table = [
         {
@@ -631,6 +644,7 @@ def test_unfamiliar_business_dimension_chart():
     ]
 
 
+# Verify that identifier or free text not inferred.
 @pytest.mark.parametrize(
     "dimension",
     [
@@ -658,6 +672,7 @@ def test_identifier_or_free_text_not_inferred(dimension):
     assert build_chart(table) is None
 
 
+# Verify that multiple inferred dimensions rejected.
 def test_multiple_inferred_dimensions_rejected():
     table = [
         {
@@ -675,6 +690,7 @@ def test_multiple_inferred_dimensions_rejected():
     assert build_chart(table) is None
 
 
+# Verify that known and inferred dimensions rejected.
 def test_known_and_inferred_dimensions_rejected():
     table = [
         {
@@ -692,6 +708,7 @@ def test_known_and_inferred_dimensions_rejected():
     assert build_chart(table) is None
 
 
+# Verify that duplicate inferred dimension rejected.
 def test_duplicate_inferred_dimension_rejected():
     table = [
         {
@@ -707,6 +724,7 @@ def test_duplicate_inferred_dimension_rejected():
     assert build_chart(table) is None
 
 
+# Verify that invalid inferred dimension rejected.
 @pytest.mark.parametrize(
     "invalid_value",
     [
@@ -733,6 +751,7 @@ def test_invalid_inferred_dimension_rejected(
     assert build_chart(table) is None
 
 
+# Verify that inferred dimension preserves input.
 def test_inferred_dimension_preserves_input():
     table = [
         {
@@ -745,10 +764,7 @@ def test_inferred_dimension_preserves_input():
         },
     ]
 
-    original = [
-        row.copy()
-        for row in table
-    ]
+    original = [row.copy() for row in table]
 
     figure = build_chart(table)
 

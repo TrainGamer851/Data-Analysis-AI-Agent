@@ -11,6 +11,7 @@ from agent.data_integrity import (
 )
 
 
+# Run the dataset integrity checks for the supplied analysis question.
 def validate(df, question):
     return validate_analysis_integrity(
         question,
@@ -18,17 +19,20 @@ def validate(df, question):
     )
 
 
+# Verify that invalid revenue requires clarification.
 def test_invalid_revenue_requires_clarification():
-    df = pd.DataFrame({
-        "Revenue_USD": [
-            "5000",
-            "unknown",
-            "3000",
-            None,
-            "2000",
-            "inf",
-        ],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue_USD": [
+                "5000",
+                "unknown",
+                "3000",
+                None,
+                "2000",
+                "inf",
+            ],
+        }
+    )
 
     result = validate(
         df,
@@ -42,10 +46,13 @@ def test_invalid_revenue_requires_clarification():
     assert "3 valid numeric row(s)" in result["answer"]
 
 
+# Verify that missing numeric values require clarification.
 def test_missing_numeric_values_require_clarification():
-    df = pd.DataFrame({
-        "Revenue": [1000, None, 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": [1000, None, 2000],
+        }
+    )
 
     result = validate(
         df,
@@ -56,10 +63,13 @@ def test_missing_numeric_values_require_clarification():
     assert "1 missing" in result["answer"]
 
 
+# Verify that nonfinite numeric values require clarification.
 def test_nonfinite_numeric_values_require_clarification():
-    df = pd.DataFrame({
-        "Revenue": [1000, float("inf"), 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": [1000, float("inf"), 2000],
+        }
+    )
 
     result = validate(
         df,
@@ -70,32 +80,47 @@ def test_nonfinite_numeric_values_require_clarification():
     assert "1 invalid" in result["answer"]
 
 
+# Verify that clean numeric values are allowed.
 def test_clean_numeric_values_are_allowed():
-    df = pd.DataFrame({
-        "Revenue": [1000, 2000, 3000],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": [1000, 2000, 3000],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate total revenue.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate total revenue.",
+        )
+        is None
+    )
 
 
+# Verify that formatted currency values are allowed.
 def test_formatted_currency_values_are_allowed():
-    df = pd.DataFrame({
-        "Revenue_USD": ["$1,000", "$2,000"],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue_USD": ["$1,000", "$2,000"],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate total revenue in USD.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate total revenue in USD.",
+        )
+        is None
+    )
 
 
+# Verify that all missing revenue is rejected.
 def test_all_missing_revenue_is_rejected():
-    df = pd.DataFrame({
-        "Revenue": [None, None],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": [None, None],
+        }
+    )
 
     result = validate(
         df,
@@ -106,38 +131,53 @@ def test_all_missing_revenue_is_rejected():
     assert "usable numeric values" in result["answer"]
 
 
+# Verify that unrelated invalid revenue does not block quantity.
 def test_unrelated_invalid_revenue_does_not_block_quantity():
-    df = pd.DataFrame({
-        "Revenue": ["1000", "unknown"],
-        "Quantity": [10, 20],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": ["1000", "unknown"],
+            "Quantity": [10, 20],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate total quantity.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate total quantity.",
+        )
+        is None
+    )
 
 
+# Verify that explicit valid values only is allowed.
 def test_explicit_valid_values_only_is_allowed():
-    df = pd.DataFrame({
-        "Revenue": ["1000", "unknown", "2000"],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": ["1000", "unknown", "2000"],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate the sum of only the valid finite revenue "
-        "values and report how many rows were excluded.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate the sum of only the valid finite revenue "
+            "values and report how many rows were excluded.",
+        )
+        is None
+    )
 
 
+# Verify that ambiguous dates require clarification.
 def test_ambiguous_dates_require_clarification():
-    df = pd.DataFrame({
-        "Order_Date": [
-            "01/02/2026",
-            "03/04/2026",
-        ],
-        "Revenue": [1000, 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Order_Date": [
+                "01/02/2026",
+                "03/04/2026",
+            ],
+            "Revenue": [1000, 2000],
+        }
+    )
 
     result = validate(
         df,
@@ -149,6 +189,7 @@ def test_ambiguous_dates_require_clarification():
     assert "DD/MM/YYYY" in result["answer"]
 
 
+# Verify that explicit date format is allowed.
 @pytest.mark.parametrize(
     "question",
     [
@@ -157,25 +198,30 @@ def test_ambiguous_dates_require_clarification():
     ],
 )
 def test_explicit_date_format_is_allowed(question):
-    df = pd.DataFrame({
-        "Order_Date": [
-            "01/02/2026",
-            "03/04/2026",
-        ],
-        "Revenue": [1000, 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Order_Date": [
+                "01/02/2026",
+                "03/04/2026",
+            ],
+            "Revenue": [1000, 2000],
+        }
+    )
 
     assert validate(df, question) is None
 
 
+# Verify that conflicting dates require clarification.
 def test_conflicting_dates_require_clarification():
-    df = pd.DataFrame({
-        "Order_Date": [
-            "01/25/2026",
-            "25/01/2026",
-        ],
-        "Revenue": [1000, 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Order_Date": [
+                "01/25/2026",
+                "25/01/2026",
+            ],
+            "Revenue": [1000, 2000],
+        }
+    )
 
     result = validate(
         df,
@@ -186,25 +232,34 @@ def test_conflicting_dates_require_clarification():
     assert "conflicting date" in result["answer"]
 
 
+# Verify that unrelated date ambiguity is allowed.
 def test_unrelated_date_ambiguity_is_allowed():
-    df = pd.DataFrame({
-        "Order_Date": [
-            "01/02/2026",
-            "03/04/2026",
-        ],
-        "Revenue": [1000, 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Order_Date": [
+                "01/02/2026",
+                "03/04/2026",
+            ],
+            "Revenue": [1000, 2000],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate total revenue regardless of date.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate total revenue regardless of date.",
+        )
+        is None
+    )
 
 
+# Verify that mixed discount scale requires clarification.
 def test_mixed_discount_scale_requires_clarification():
-    df = pd.DataFrame({
-        "Discount": [0.15, 20, 0.10, 30],
-    })
+    df = pd.DataFrame(
+        {
+            "Discount": [0.15, 20, 0.10, 30],
+        }
+    )
 
     result = validate(
         df,
@@ -215,74 +270,110 @@ def test_mixed_discount_scale_requires_clarification():
     assert "discount units" in result["answer"]
 
 
+# Verify that explicit discount conversion is allowed.
 def test_explicit_discount_conversion_is_allowed():
-    df = pd.DataFrame({
-        "Discount": [0.15, 20, 0.10, 30],
-    })
+    df = pd.DataFrame(
+        {
+            "Discount": [0.15, 20, 0.10, 30],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate average discount percentage. "
-        "Convert fractional values to percentages "
-        "and treat values above 1 as percentage points.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate average discount percentage. "
+            "Convert fractional values to percentages "
+            "and treat values above 1 as percentage points.",
+        )
+        is None
+    )
 
 
+# Verify that fractional discount is allowed.
 def test_fractional_discount_is_allowed():
-    df = pd.DataFrame({
-        "Discount": [0.15, 0.20, 0.30],
-    })
+    df = pd.DataFrame(
+        {
+            "Discount": [0.15, 0.20, 0.30],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate average discount percentage.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate average discount percentage.",
+        )
+        is None
+    )
 
 
+# Verify that explicit percentage column is allowed.
 def test_explicit_percentage_column_is_allowed():
-    df = pd.DataFrame({
-        "Discount_Pct": [0.5, 10, 20],
-    })
+    df = pd.DataFrame(
+        {
+            "Discount_Pct": [0.5, 10, 20],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate average discount percentage.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate average discount percentage.",
+        )
+        is None
+    )
 
 
+# Verify that unrelated discount problem is allowed.
 def test_unrelated_discount_problem_is_allowed():
-    df = pd.DataFrame({
-        "Discount": [0.15, 20],
-        "Revenue": [1000, 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Discount": [0.15, 20],
+            "Revenue": [1000, 2000],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate total revenue.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate total revenue.",
+        )
+        is None
+    )
 
 
+# Verify that unfamiliar numeric column is allowed.
 def test_unfamiliar_numeric_column_is_allowed():
-    df = pd.DataFrame({
-        "Billed_Value_USD": [1000, 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Billed_Value_USD": [1000, 2000],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate total billed value.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate total billed value.",
+        )
+        is None
+    )
 
 
+# Verify that explicit column takes priority.
 def test_explicit_column_takes_priority():
-    df = pd.DataFrame({
-        "Sales": ["1000", "unknown"],
-        "Revenue": [1000, 2000],
-    })
+    df = pd.DataFrame(
+        {
+            "Sales": ["1000", "unknown"],
+            "Revenue": [1000, 2000],
+        }
+    )
 
-    assert validate(
-        df,
-        "Calculate total revenue.",
-    ) is None
+    assert (
+        validate(
+            df,
+            "Calculate total revenue.",
+        )
+        is None
+    )
 
     result = validate(
         df,
@@ -293,17 +384,24 @@ def test_explicit_column_takes_priority():
     assert "'Sales'" in result["answer"]
 
 
+# Verify that profile unavailable preserves fallback.
 def test_profile_unavailable_preserves_fallback():
-    assert validate_analysis_integrity(
-        "Calculate total revenue.",
-        None,
-    ) is None
+    assert (
+        validate_analysis_integrity(
+            "Calculate total revenue.",
+            None,
+        )
+        is None
+    )
 
 
+# Verify that original dataframe is unchanged.
 def test_original_dataframe_is_unchanged():
-    df = pd.DataFrame({
-        "Revenue": ["1000", "unknown"],
-    })
+    df = pd.DataFrame(
+        {
+            "Revenue": ["1000", "unknown"],
+        }
+    )
 
     original = df.copy(deep=True)
 
@@ -315,6 +413,7 @@ def test_original_dataframe_is_unchanged():
     pd.testing.assert_frame_equal(df, original)
 
 
+# Verify that date convention recognition.
 @pytest.mark.parametrize(
     "question, expected",
     [
@@ -330,6 +429,7 @@ def test_date_convention_recognition(question, expected):
     assert explicit_date_convention(question) == expected
 
 
+# Verify that exclusion permission.
 @pytest.mark.parametrize(
     "question, expected",
     [
@@ -343,6 +443,7 @@ def test_exclusion_permission(question, expected):
     assert explicitly_allows_exclusions(question) == expected
 
 
+# Verify that discount conversion requires explicit rule.
 def test_discount_conversion_requires_explicit_rule():
     assert not explicitly_defines_discount_scale(
         "Calculate average discount percentage."

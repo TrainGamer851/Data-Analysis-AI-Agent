@@ -17,6 +17,7 @@ from agent.result_formatter import (
 )
 
 
+# Verify that explicit currency detection.
 @pytest.mark.parametrize(
     "name, expected",
     [
@@ -43,6 +44,7 @@ def test_explicit_currency_detection(name, expected):
     assert get_explicit_currency(name) == expected
 
 
+# Verify that currency formatting.
 @pytest.mark.parametrize(
     "value, currency, expected",
     [
@@ -64,12 +66,13 @@ def test_currency_formatting(value, currency, expected):
     assert format_currency(value, currency) == expected
 
 
+# Verify that unsupported currency.
 def test_unsupported_currency():
     with pytest.raises(ValueError):
         format_currency(100, "UNKNOWN")
 
 
-
+# Verify that named value currency formatting.
 @pytest.mark.parametrize(
     "name, value, expected",
     [
@@ -210,52 +213,60 @@ def test_named_value_currency_formatting(
     value,
     expected,
 ):
-    assert format_named_value(
-        name,
-        value,
-    ) == expected
+    assert (
+        format_named_value(
+            name,
+            value,
+        )
+        == expected
+    )
 
 
+# Verify that single metric summary usd.
 def test_single_metric_summary_usd():
-    answer = summarize_single_metric({
-        "Total_Revenue_USD": 10000,
-    })
-
-    assert answer == (
-        "Total Revenue USD is **$10,000.00**."
+    answer = summarize_single_metric(
+        {
+            "Total_Revenue_USD": 10000,
+        }
     )
 
+    assert answer == ("Total Revenue USD is **$10,000.00**.")
 
+
+# Verify that single metric summary eur.
 def test_single_metric_summary_eur():
-    answer = summarize_single_metric({
-        "Total_Revenue_EUR": 8000,
-    })
-
-    assert answer == (
-        "Total Revenue EUR is **€8,000.00**."
+    answer = summarize_single_metric(
+        {
+            "Total_Revenue_EUR": 8000,
+        }
     )
 
+    assert answer == ("Total Revenue EUR is **€8,000.00**.")
 
+
+# Verify that single metric summary negative gbp.
 def test_single_metric_summary_negative_gbp():
-    answer = summarize_single_metric({
-        "Net_Profit_GBP": -500,
-    })
-
-    assert answer == (
-        "Net Profit GBP is **-£500.00**."
+    answer = summarize_single_metric(
+        {
+            "Net_Profit_GBP": -500,
+        }
     )
 
+    assert answer == ("Net Profit GBP is **-£500.00**.")
 
+
+# Verify that single metric percentage unchanged.
 def test_single_metric_percentage_unchanged():
-    answer = summarize_single_metric({
-        "ROI_Pct": 182.76,
-    })
-
-    assert answer == (
-        "ROI % is **182.76%**."
+    answer = summarize_single_metric(
+        {
+            "ROI_Pct": 182.76,
+        }
     )
 
+    assert answer == ("ROI % is **182.76%**.")
 
+
+# Verify that currency formatting preserves original result.
 def test_currency_formatting_preserves_original_result():
     result = {
         "Total_Revenue_USD": 10000.5678,
@@ -272,64 +283,94 @@ def test_currency_formatting_preserves_original_result():
 # Explicit currency explanation validation
 # --------------------------------------------------
 
+
+# Verify that explicit currency explanation.
 @pytest.mark.parametrize(
     "name, value, explanation, expected",
     [
         (
-            "Revenue_USD", 10000,
-            "Revenue is $10,000.00.", True,
+            "Revenue_USD",
+            10000,
+            "Revenue is $10,000.00.",
+            True,
         ),
         (
-            "Revenue_EUR", 8000,
-            "Revenue is €8,000.00.", True,
+            "Revenue_EUR",
+            8000,
+            "Revenue is €8,000.00.",
+            True,
         ),
         (
-            "Revenue_GBP", 6000,
-            "Revenue is £6,000.00.", True,
+            "Revenue_GBP",
+            6000,
+            "Revenue is £6,000.00.",
+            True,
         ),
         (
-            "Revenue_CAD", 3000,
-            "Revenue is CAD 3,000.00.", True,
+            "Revenue_CAD",
+            3000,
+            "Revenue is CAD 3,000.00.",
+            True,
         ),
         (
-            "Revenue_AUD", 4000,
-            "Revenue is AUD 4,000.00.", True,
+            "Revenue_AUD",
+            4000,
+            "Revenue is AUD 4,000.00.",
+            True,
         ),
         (
-            "Revenue_EUR", 8000,
-            "Revenue is $8,000.00.", False,
+            "Revenue_EUR",
+            8000,
+            "Revenue is $8,000.00.",
+            False,
         ),
         (
-            "Revenue_GBP", 6000,
-            "Revenue is €6,000.00.", False,
+            "Revenue_GBP",
+            6000,
+            "Revenue is €6,000.00.",
+            False,
         ),
         (
-            "Revenue_USD", 10000,
-            "Profit is $10,000.00.", False,
+            "Revenue_USD",
+            10000,
+            "Profit is $10,000.00.",
+            False,
         ),
         (
-            "Revenue_USD", 10000,
-            "Revenue is $12,000.00.", False,
+            "Revenue_USD",
+            10000,
+            "Revenue is $12,000.00.",
+            False,
         ),
         (
-            "Revenue_USD", 10000,
-            "Revenue is -$10,000.00.", False,
+            "Revenue_USD",
+            10000,
+            "Revenue is -$10,000.00.",
+            False,
         ),
         (
-            "Revenue_USD", 10000,
-            "Revenue is not $10,000.00.", False,
+            "Revenue_USD",
+            10000,
+            "Revenue is not $10,000.00.",
+            False,
         ),
         (
-            "Net_Profit_GBP", -500,
-            "Net Profit is -£500.00.", True,
+            "Net_Profit_GBP",
+            -500,
+            "Net Profit is -£500.00.",
+            True,
         ),
         (
-            "Revenue_USD", 10000.5678,
-            "Revenue is $10,000.57.", True,
+            "Revenue_USD",
+            10000.5678,
+            "Revenue is $10,000.57.",
+            True,
         ),
         (
-            "Revenue_USD", 10000,
-            "Revenue is 10,000.00.", False,
+            "Revenue_USD",
+            10000,
+            "Revenue is 10,000.00.",
+            False,
         ),
     ],
 )
@@ -339,16 +380,21 @@ def test_explicit_currency_explanation(
     explanation,
     expected,
 ):
-    assert validate_single_metric_explanation(
-        explanation,
-        {name: value},
-    ) is expected
+    assert (
+        validate_single_metric_explanation(
+            explanation,
+            {name: value},
+        )
+        is expected
+    )
 
 
 # --------------------------------------------------
 # Multi-metric summaries
 # --------------------------------------------------
 
+
+# Verify that valid revenue exclusion summary.
 def test_valid_revenue_exclusion_summary():
     result = {
         "Total_Valid_Revenue_USD": 10000,
@@ -356,11 +402,11 @@ def test_valid_revenue_exclusion_summary():
     }
 
     assert summarize_multiple_metrics(result) == (
-        "The total valid revenue is "
-        "**$10,000.00**, excluding **3 rows**."
+        "The total valid revenue is " "**$10,000.00**, excluding **3 rows**."
     )
 
 
+# Verify that single excluded row summary.
 def test_single_excluded_row_summary():
     result = {
         "Total_Valid_Revenue_EUR": 8000,
@@ -368,11 +414,11 @@ def test_single_excluded_row_summary():
     }
 
     assert summarize_multiple_metrics(result) == (
-        "The total valid revenue is "
-        "**€8,000.00**, excluding **1 row**."
+        "The total valid revenue is " "**€8,000.00**, excluding **1 row**."
     )
 
 
+# Verify that independent metric summary.
 def test_independent_metric_summary():
     result = {
         "Total_Revenue_USD": 10000,
@@ -387,6 +433,7 @@ def test_independent_metric_summary():
     assert "Profit Margin % is **20.00%**." in answer
 
 
+# Verify that unsupported multi metric summary.
 @pytest.mark.parametrize(
     "result",
     [
@@ -405,37 +452,32 @@ def test_unsupported_multi_metric_summary(result):
     assert summarize_multiple_metrics(result) is None
 
 
+# Verify that multi metric explanation validation.
 @pytest.mark.parametrize(
     "explanation, expected",
     [
         (
-            "The total valid revenue is "
-            "$10,000.00, excluding 3 rows.",
+            "The total valid revenue is " "$10,000.00, excluding 3 rows.",
             True,
         ),
         (
-            "The total valid revenue is "
-            "**$10,000.00**, excluding **3 rows**.",
+            "The total valid revenue is " "**$10,000.00**, excluding **3 rows**.",
             True,
         ),
         (
-            "The total valid revenue is "
-            "$12,000.00, excluding 3 rows.",
+            "The total valid revenue is " "$12,000.00, excluding 3 rows.",
             False,
         ),
         (
-            "The total valid revenue is "
-            "$10,000.00, excluding 5 rows.",
+            "The total valid revenue is " "$10,000.00, excluding 5 rows.",
             False,
         ),
         (
-            "The total valid revenue is "
-            "€10,000.00, excluding 3 rows.",
+            "The total valid revenue is " "€10,000.00, excluding 3 rows.",
             False,
         ),
         (
-            "The total valid revenue is "
-            "-$10,000.00, excluding 3 rows.",
+            "The total valid revenue is " "-$10,000.00, excluding 3 rows.",
             False,
         ),
         (
@@ -443,8 +485,7 @@ def test_unsupported_multi_metric_summary(result):
             False,
         ),
         (
-            "The total valid profit is "
-            "$10,000.00, excluding 3 rows.",
+            "The total valid profit is " "$10,000.00, excluding 3 rows.",
             False,
         ),
         (
@@ -454,8 +495,7 @@ def test_unsupported_multi_metric_summary(result):
             False,
         ),
         (
-            "The total valid revenue is not "
-            "$10,000.00, excluding 3 rows.",
+            "The total valid revenue is not " "$10,000.00, excluding 3 rows.",
             False,
         ),
     ],
@@ -469,22 +509,23 @@ def test_multi_metric_explanation_validation(
         "Excluded_Rows": 3,
     }
 
-    assert validate_multiple_metric_explanation(
-        explanation,
-        result,
-    ) is expected
+    assert (
+        validate_multiple_metric_explanation(
+            explanation,
+            result,
+        )
+        is expected
+    )
 
 
+# Verify that multi metric swapped values rejected.
 def test_multi_metric_swapped_values_rejected():
     result = {
         "Total_Revenue_USD": 10000,
         "Net_Profit_USD": 2000,
     }
 
-    explanation = (
-        "Total Revenue USD is $2,000.00. "
-        "Net Profit USD is $10,000.00."
-    )
+    explanation = "Total Revenue USD is $2,000.00. " "Net Profit USD is $10,000.00."
 
     assert not validate_multiple_metric_explanation(
         explanation,
@@ -492,6 +533,7 @@ def test_multi_metric_swapped_values_rejected():
     )
 
 
+# Verify that multi metric summary preserves original values.
 def test_multi_metric_summary_preserves_original_values():
     result = {
         "Total_Revenue_USD": 10000.5678,
@@ -505,6 +547,7 @@ def test_multi_metric_summary_preserves_original_values():
     assert result == original
 
 
+# Verify that multi metric correlation disclaimer.
 def test_multi_metric_correlation_disclaimer():
     result = {
         "Total_Revenue_USD": 10000,
@@ -522,6 +565,7 @@ def test_multi_metric_correlation_disclaimer():
 # --------------------------------------------------
 
 
+# Verify that single metric percentage precision.
 @pytest.mark.parametrize(
     "value, expected",
     [
@@ -543,11 +587,10 @@ def test_single_metric_percentage_precision(
 
     answer = summarize_single_metric(result)
 
-    assert answer == (
-        f"Profit Margin % is **{expected}**."
-    )
+    assert answer == (f"Profit Margin % is **{expected}**.")
 
 
+# Verify that single metric correlation disclaimer.
 @pytest.mark.parametrize(
     "value, expected",
     [
@@ -575,6 +618,7 @@ def test_single_metric_correlation_disclaimer(
     )
 
 
+# Verify that single metric correlation preserves value.
 def test_single_metric_correlation_preserves_value():
     result = {
         "Discount_Profit_Correlation": -0.47823456,
@@ -587,16 +631,15 @@ def test_single_metric_correlation_preserves_value():
     assert result == original
 
 
+# Verify that non correlation has no disclaimer.
 def test_non_correlation_has_no_disclaimer():
-    answer = summarize_single_metric({
-        "Total_Revenue_USD": 10000,
-    })
-
-    assert (
-        "Correlation does not establish causation."
-        not in answer
+    answer = summarize_single_metric(
+        {
+            "Total_Revenue_USD": 10000,
+        }
     )
 
+    assert "Correlation does not establish causation." not in answer
 
 
 # --------------------------------------------------
@@ -604,6 +647,7 @@ def test_non_correlation_has_no_disclaimer():
 # --------------------------------------------------
 
 
+# Verify that scalar correlation precision.
 @pytest.mark.parametrize(
     "value, expected",
     [
@@ -620,8 +664,7 @@ def test_scalar_correlation_precision(
     expected,
 ):
     answer = summarize_scalar_correlation(
-        "Calculate the Pearson correlation "
-        "between Discount_Pct and Net_Profit_USD.",
+        "Calculate the Pearson correlation " "between Discount_Pct and Net_Profit_USD.",
         value,
     )
 
@@ -632,6 +675,7 @@ def test_scalar_correlation_precision(
     )
 
 
+# Verify that scalar correlation method.
 @pytest.mark.parametrize(
     "question, label",
     [
@@ -671,11 +715,11 @@ def test_scalar_correlation_method(
     )
 
     assert answer == (
-        f"{label} is **0.5123**.\n\n"
-        "Correlation does not establish causation."
+        f"{label} is **0.5123**.\n\n" "Correlation does not establish causation."
     )
 
 
+# Verify that invalid scalar correlation.
 @pytest.mark.parametrize(
     "value",
     [
@@ -693,12 +737,16 @@ def test_scalar_correlation_method(
     ],
 )
 def test_invalid_scalar_correlation(value):
-    assert summarize_scalar_correlation(
-        "Calculate the Pearson correlation.",
-        value,
-    ) is None
+    assert (
+        summarize_scalar_correlation(
+            "Calculate the Pearson correlation.",
+            value,
+        )
+        is None
+    )
 
 
+# Verify that unsupported scalar correlation question.
 @pytest.mark.parametrize(
     "question",
     [
@@ -711,10 +759,8 @@ def test_invalid_scalar_correlation(value):
         "Calculate the correlation by region.",
         "Calculate the correlation by category.",
         "Calculate the correlation by department.",
-        "Calculate the correlation and also "
-        "the total revenue.",
-        "Calculate the correlation as well as "
-        "the average profit.",
+        "Calculate the correlation and also " "the total revenue.",
+        "Calculate the correlation as well as " "the average profit.",
         "Find the strongest correlation.",
         "What is the number of correlations?",
         "Does correlation imply causation?",
@@ -725,12 +771,16 @@ def test_invalid_scalar_correlation(value):
 def test_unsupported_scalar_correlation_question(
     question,
 ):
-    assert summarize_scalar_correlation(
-        question,
-        0.5,
-    ) is None
+    assert (
+        summarize_scalar_correlation(
+            question,
+            0.5,
+        )
+        is None
+    )
 
 
+# Verify that scalar correlation preserves precision.
 def test_scalar_correlation_preserves_precision():
     value = 0.048992244529133366
 
@@ -741,40 +791,47 @@ def test_scalar_correlation_preserves_precision():
 
     assert "**0.0490**" in answer
     assert value == 0.048992244529133366
-    assert answer.count(
-        "Correlation does not establish causation."
-    ) == 1
+    assert answer.count("Correlation does not establish causation.") == 1
+
 
 # --------------------------------------------------
 # Statistical explanation integrity
 # --------------------------------------------------
 
 CORRELATION_QUESTION = (
-    "Calculate the Pearson correlation "
-    "between Sales and Profit and explain it."
+    "Calculate the Pearson correlation " "between Sales and Profit and explain it."
 )
 
 
+# Verify that extract scalar correlation.
 def test_extract_scalar_correlation():
     value = 0.048992244529133366
 
-    assert extract_single_correlation(
-        CORRELATION_QUESTION,
-        value,
-    ) == value
+    assert (
+        extract_single_correlation(
+            CORRELATION_QUESTION,
+            value,
+        )
+        == value
+    )
 
 
+# Verify that extract named correlation.
 def test_extract_named_correlation():
     result = {
         "Sales_Profit_Pearson_Correlation": 0.5,
     }
 
-    assert extract_single_correlation(
-        CORRELATION_QUESTION,
-        result,
-    ) == 0.5
+    assert (
+        extract_single_correlation(
+            CORRELATION_QUESTION,
+            result,
+        )
+        == 0.5
+    )
 
 
+# Verify that discard unverified correlation narrative.
 @pytest.mark.parametrize(
     "field",
     [
@@ -806,6 +863,7 @@ def test_discard_unverified_correlation_narrative(field):
     assert result == original
 
 
+# Verify that unsupported correlation evidence.
 @pytest.mark.parametrize(
     "result",
     [
@@ -844,12 +902,16 @@ def test_discard_unverified_correlation_narrative(field):
     ],
 )
 def test_unsupported_correlation_evidence(result):
-    assert extract_single_correlation(
-        CORRELATION_QUESTION,
-        result,
-    ) is None
+    assert (
+        extract_single_correlation(
+            CORRELATION_QUESTION,
+            result,
+        )
+        is None
+    )
 
 
+# Verify that correlation interpretation strength.
 @pytest.mark.parametrize(
     "value, expected",
     [
@@ -879,11 +941,10 @@ def test_correlation_interpretation_strength(
     assert expected in answer
     assert f"**{value:.4f}**" in answer
 
-    assert answer.count(
-        "Correlation does not establish causation."
-    ) == 1
+    assert answer.count("Correlation does not establish causation.") == 1
 
 
+# Verify that method specific correlation interpretation.
 @pytest.mark.parametrize(
     "method, expected",
     [
@@ -906,6 +967,7 @@ def test_method_specific_correlation_interpretation(
     assert f"The {method} correlation" in answer
 
 
+# Verify that zero correlation interpretation.
 def test_zero_correlation_interpretation():
     answer = summarize_correlation_interpretation(
         CORRELATION_QUESTION,
@@ -916,6 +978,7 @@ def test_zero_correlation_interpretation():
     assert "no linear association" in answer
 
 
+# Verify that correlation interpretation preserves precision.
 def test_correlation_interpretation_preserves_precision():
     value = 0.048992244529133366
 
@@ -928,8 +991,12 @@ def test_correlation_interpretation_preserves_precision():
     assert value == 0.048992244529133366
 
 
+# Verify that correlation interpretation unrelated question.
 def test_correlation_interpretation_unrelated_question():
-    assert summarize_correlation_interpretation(
-        "Calculate the ratio of Sales to Profit.",
-        0.5,
-    ) is None
+    assert (
+        summarize_correlation_interpretation(
+            "Calculate the ratio of Sales to Profit.",
+            0.5,
+        )
+        is None
+    )

@@ -1,5 +1,3 @@
-"""Manage cancellable analysis subprocesses."""
-
 import json
 import logging
 import os
@@ -17,7 +15,6 @@ from agent.conversation_context import (
     build_conversation_context,
 )
 
-
 ANALYSIS_TIMEOUT_SECONDS = 120
 MAX_CONCURRENT_ANALYSES = 2
 POLL_INTERVAL_SECONDS = 0.1
@@ -31,6 +28,8 @@ _RUNNING_JOBS = set()
 _RUNNING_CONDITION = threading.Condition()
 _SHUTTING_DOWN = False
 
+
+# Build the standard response object for an analysis error.
 def error_response(message):
     return {
         "answer": None,
@@ -42,20 +41,23 @@ def error_response(message):
 class AnalysisJob:
     """Represent one independently cancellable analysis."""
 
+    # Initialize the object and store its starting state.
     def __init__(self):
         self.job_id = uuid.uuid4().hex
         self.cancel_event = threading.Event()
 
+    # Request cancellation of the analysis job.
     def cancel(self):
         self.cancel_event.set()
 
+    # Return whether cancellation has been requested for the job.
     @property
     def cancelled(self):
         return self.cancel_event.is_set()
 
 
+# Cancel active analyses and wait for their cleanup.
 def shutdown_analysis_jobs(timeout=60):
-    """Cancel active analyses and wait for their cleanup."""
 
     global _SHUTTING_DOWN
 
@@ -64,12 +66,15 @@ def shutdown_analysis_jobs(timeout=60):
     with _RUNNING_CONDITION:
         _SHUTTING_DOWN = True
 
+        # Process each `job` from `_RUNNING_JOBS`.
         for job in _RUNNING_JOBS:
             job.cancel()
 
+        # Repeat the block while `_RUNNING_JOBS` is true.
         while _RUNNING_JOBS:
             remaining = deadline - time.monotonic()
 
+            # Call `logger.warning` when `remaining <= 0`.
             if remaining <= 0:
                 logger.warning(
                     "Shutdown timed out with %d active jobs",
@@ -77,20 +82,20 @@ def shutdown_analysis_jobs(timeout=60):
                 )
                 return False
 
-            _RUNNING_CONDITION.wait(
-                timeout=remaining
-            )
+            _RUNNING_CONDITION.wait(timeout=remaining)
 
     return True
 
 
+# Terminate the analysis process and its subprocesses.
 def terminate_process(process):
-    """Terminate the analysis process and its subprocesses."""
 
+    # Return without a value when `process.poll() is not None`.
     if process.poll() is not None:
         return
 
     try:
+        # Call `subprocess.run` when `os.name == 'nt'`.
         if os.name == "nt":
             subprocess.run(
                 [
@@ -103,19 +108,21 @@ def terminate_process(process):
                 capture_output=True,
                 timeout=10,
             )
+        # Call `os.killpg` when no earlier condition matches.
         else:
             os.killpg(process.pid, signal.SIGKILL)
 
         process.wait(timeout=5)
 
     except (OSError, subprocess.TimeoutExpired):
+        # Call `process.kill` when `process.poll() is None`.
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
 
 
+# Remove Docker containers belonging only to this job.
 def cleanup_docker(job_id):
-    """Remove Docker containers belonging only to this job."""
 
     try:
         result = subprocess.run(
@@ -140,6 +147,7 @@ def cleanup_docker(job_id):
             job_id=job_id,
         )
 
+        # Call `subprocess.run` when `container_ids`.
         if container_ids:
             subprocess.run(
                 ["docker", "rm", "-f", *container_ids],
@@ -161,6 +169,7 @@ def cleanup_docker(job_id):
         )
 
 
+# Run analysis with cancellation and an overall deadline.
 def run_controlled_analysis(
     csv_path,
     question,
@@ -171,6 +180,7 @@ def run_controlled_analysis(
 ):
     """Run analysis with cancellation and an overall deadline."""
 
+    # Update `job` when `job is None`.
     if job is None:
         job = AnalysisJob()
 
@@ -186,18 +196,18 @@ def run_controlled_analysis(
     )
 
     with _RUNNING_CONDITION:
+        # Return the selected result when `_SHUTTING_DOWN`.
         if _SHUTTING_DOWN:
-            return error_response(
-                "The analysis service is shutting down."
-            )
+            return error_response("The analysis service is shutting down.")
 
+        # Return the selected result when `job.cancelled`.
         if job.cancelled:
             return error_response("Analysis stopped.")
 
+        # Return the selected result when `not _SLOTS.acquire(blocking=False)`.
         if not _SLOTS.acquire(blocking=False):
             return error_response(
-                "The analysis service is busy. "
-                "Please try again in a moment."
+                "The analysis service is busy. " "Please try again in a moment."
             )
 
         _RUNNING_JOBS.add(job)
@@ -212,22 +222,20 @@ def run_controlled_analysis(
     deadline = time.monotonic() + timeout
 
     try:
-        with tempfile.TemporaryDirectory(
-            prefix="analysis-"
-        ) as directory:
+        with tempfile.TemporaryDirectory(prefix="analysis-") as directory:
 
             request_path = Path(directory) / "request.json"
             result_path = Path(directory) / "result.json"
 
             request_path.write_text(
-                json.dumps({
-                    "csv_path": str(Path(csv_path).resolve()) if csv_path else None,
-                    "question": question,
-                    "explain": explain,
-                    "context": build_conversation_context(
-                        context
-                    ),
-                }),
+                json.dumps(
+                    {
+                        "csv_path": str(Path(csv_path).resolve()) if csv_path else None,
+                        "question": question,
+                        "explain": explain,
+                        "context": build_conversation_context(context),
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -239,8 +247,7 @@ def run_controlled_analysis(
 
             debug_log(
                 "CONTEXT",
-                f"Serialized messages: "
-                f"{len(build_conversation_context(context))}",
+                f"Serialized messages: " f"{len(build_conversation_context(context))}",
                 job_id=job.job_id,
             )
 
@@ -264,13 +271,14 @@ def run_controlled_analysis(
 
             process_options = {}
 
+            # Update `process_options['creationflags']` when `os.name == 'nt'`.
             if os.name == "nt":
-                process_options["creationflags"] = (
-                    subprocess.CREATE_NEW_PROCESS_GROUP
-                )
+                process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            # Update `process_options['start_new_session']` when no earlier condition matches.
             else:
                 process_options["start_new_session"] = True
 
+            # Return the selected result when `job.cancelled`.
             if job.cancelled:
                 return error_response("Analysis stopped.")
 
@@ -306,7 +314,9 @@ def run_controlled_analysis(
             )
 
             try:
+                # Repeat the block while `True` is true.
                 while True:
+                    # Call `debug_log` when `job.cancelled`.
                     if job.cancelled:
                         debug_log(
                             "CANCEL",
@@ -314,10 +324,9 @@ def run_controlled_analysis(
                             job_id=job.job_id,
                         )
 
-                        return error_response(
-                            "Analysis stopped."
-                        )
+                        return error_response("Analysis stopped.")
 
+                    # Call `debug_log` when `time.monotonic() >= deadline`.
                     if time.monotonic() >= deadline:
                         debug_log(
                             "TIMEOUT",
@@ -326,37 +335,34 @@ def run_controlled_analysis(
                         )
 
                         return error_response(
-                            f"Analysis timed out after "
-                            f"{timeout} seconds."
+                            f"Analysis timed out after " f"{timeout} seconds."
                         )
 
+                    # Call `debug_log` when `process.poll() is not None`.
                     if process.poll() is not None:
                         debug_log(
                             "PROCESS",
-                            f"Worker exited with code "
-                            f"{process.returncode}",
+                            f"Worker exited with code " f"{process.returncode}",
                             job_id=job.job_id,
                         )
 
                         break
 
-                    job.cancel_event.wait(
-                        POLL_INTERVAL_SECONDS
-                    )
+                    job.cancel_event.wait(POLL_INTERVAL_SECONDS)
 
+                # Return the selected result when `job.cancelled`.
                 if job.cancelled:
                     return error_response("Analysis stopped.")
 
+                # Return the selected result when `process.returncode != 0`.
                 if process.returncode != 0:
                     return error_response(
-                        "The analysis process failed. "
-                        "Please try again."
+                        "The analysis process failed. " "Please try again."
                     )
 
+                # Return the selected result when `not result_path.exists()`.
                 if not result_path.exists():
-                    return error_response(
-                        "The analysis returned no result."
-                    )
+                    return error_response("The analysis returned no result.")
 
                 debug_log(
                     "RESULT",
@@ -364,15 +370,15 @@ def run_controlled_analysis(
                     job_id=job.job_id,
                 )
 
-                result = json.loads(
-                    result_path.read_text(encoding="utf-8")
-                )
+                result = json.loads(result_path.read_text(encoding="utf-8"))
 
                 debug_log(
                     "RESULT",
-                    "Worker returned an error"
-                    if result.get("error")
-                    else "Worker result received successfully",
+                    (
+                        "Worker returned an error"
+                        if result.get("error")
+                        else "Worker result received successfully"
+                    ),
                     job_id=job.job_id,
                 )
 
@@ -386,6 +392,7 @@ def run_controlled_analysis(
                 )
 
                 try:
+                    # Call `debug_log` when `process.poll() is None`.
                     if process.poll() is None:
                         debug_log(
                             "PROCESS",
@@ -420,8 +427,7 @@ def run_controlled_analysis(
         logger.exception("Analysis controller failed")
 
         return error_response(
-            "An unexpected analysis error occurred. "
-            "Please try again."
+            "An unexpected analysis error occurred. " "Please try again."
         )
 
     finally:
@@ -441,8 +447,8 @@ def run_controlled_analysis(
         timer.finish("Controller lifecycle finished")
 
 
+# Execute the existing agent inside the child process.
 def _worker(request_path, result_path):
-    """Execute the existing agent inside the child process."""
 
     timer = DebugTimer("WORKER")
 
@@ -465,31 +471,24 @@ def _worker(request_path, result_path):
 
     from agent.agent_runner import run_analysis
 
-    import_timer.finish(
-        "Essential analysis dependencies loaded"
+    import_timer.finish("Essential analysis dependencies loaded")
+
+    debug_log(
+        "IMPORT",
+        f"mini-swe-agent loaded: " f"{'minisweagent' in sys.modules}",
     )
 
     debug_log(
         "IMPORT",
-        f"mini-swe-agent loaded: "
-        f"{'minisweagent' in sys.modules}",
+        f"LLM client loaded: " f"{'agent.llm_client' in sys.modules}",
     )
 
     debug_log(
         "IMPORT",
-        f"LLM client loaded: "
-        f"{'agent.llm_client' in sys.modules}",
+        f"Sandbox environment loaded: " f"{'agent.execution_env' in sys.modules}",
     )
 
-    debug_log(
-        "IMPORT",
-        f"Sandbox environment loaded: "
-        f"{'agent.execution_env' in sys.modules}",
-    )
-
-    request = json.loads(
-        Path(request_path).read_text(encoding="utf-8")
-    )
+    request = json.loads(Path(request_path).read_text(encoding="utf-8"))
 
     debug_log(
         "WORKER",
@@ -498,8 +497,7 @@ def _worker(request_path, result_path):
 
     debug_log(
         "CONTEXT",
-        f"Worker received "
-        f"{len(request.get('context') or [])} messages",
+        f"Worker received " f"{len(request.get('context') or [])} messages",
     )
 
     debug_log(
@@ -516,27 +514,22 @@ def _worker(request_path, result_path):
 
     debug_log(
         "IMPORT SUMMARY",
-        f"mini-swe-agent loaded: "
-        f"{'minisweagent' in sys.modules}",
+        f"mini-swe-agent loaded: " f"{'minisweagent' in sys.modules}",
     )
 
     debug_log(
         "IMPORT SUMMARY",
-        f"LLM client loaded: "
-        f"{'agent.llm_client' in sys.modules}",
+        f"LLM client loaded: " f"{'agent.llm_client' in sys.modules}",
     )
 
     debug_log(
         "IMPORT SUMMARY",
-        f"Sandbox environment loaded: "
-        f"{'agent.execution_env' in sys.modules}",
+        f"Sandbox environment loaded: " f"{'agent.execution_env' in sys.modules}",
     )
 
     debug_log(
         "WORKER",
-        "Agent returned an error"
-        if result.get("error")
-        else "Agent returned a result",
+        "Agent returned an error" if result.get("error") else "Agent returned a result",
     )
 
     Path(result_path).write_text(
@@ -552,10 +545,10 @@ def _worker(request_path, result_path):
     timer.finish("Worker execution finished")
 
 
+# Evaluate the nested condition when `__name__ == '__main__'`.
 if __name__ == "__main__":
+    # Raise `SystemExit` when `len(sys.argv) != 3`.
     if len(sys.argv) != 3:
-        raise SystemExit(
-            "Expected request and result file paths."
-        )
+        raise SystemExit("Expected request and result file paths.")
 
     _worker(sys.argv[1], sys.argv[2])

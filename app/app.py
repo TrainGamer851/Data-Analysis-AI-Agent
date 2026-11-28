@@ -323,11 +323,13 @@ business_css = """
 """
 
 # ----------------------------------
-# Function to read CSV files
+# Upload CSV data, validate it, and prepare a preview for the dashboard.
 # ----------------------------------
 
 
+# Read an uploaded CSV and return its preview, status, dimensions, and path while reporting empty or invalid files.
 def load_csv(file_path):
+    # Return the fallback response when `file_path is None`.
     if file_path is None:
         return (
             pd.DataFrame(),
@@ -350,8 +352,7 @@ def load_csv(file_path):
 
         debug_log(
             "DATASET",
-            f"Rows: {df.shape[0]:,} | "
-            f"Columns: {df.shape[1]}",
+            f"Rows: {df.shape[0]:,} | " f"Columns: {df.shape[1]}",
         )
 
         debug_log(
@@ -361,6 +362,7 @@ def load_csv(file_path):
 
         timer.finish("CSV read completed")
 
+        # Return the fallback response when `df.empty`.
         if df.empty:
             return (
                 pd.DataFrame(),
@@ -389,10 +391,11 @@ def load_csv(file_path):
 
 
 # ----------------------------------
-# Function to Analyze Questions (Placeholder)
+# Analyze questions and prepare supporting tables and visualizations.
 # ----------------------------------
 
 
+# Run an analysis with conversation context, format its answer and supporting table, and add a chart when the result supports one.
 def analyze_question_with_chart(
     question,
     csv_path,
@@ -400,9 +403,12 @@ def analyze_question_with_chart(
     context=None,
 ):
     from agent.research import is_research_request
+
+    # Ask for a dataset before analysis unless the request is a supported external-research question.
     if not csv_path and not is_research_request(question):
         return "Please upload a CSV file first.", None
 
+    # Reject blank questions before starting analysis or consuming a worker job.
     if not question or not question.strip():
         return (
             "Please enter a question about your dataset.",
@@ -412,6 +418,7 @@ def analyze_question_with_chart(
     try:
         context = build_conversation_context(context)
 
+        # Use the regular runner for standalone calls and the controlled runner when cancellation is available.
         if job is None:
             response = run_analysis(
                 csv_path,
@@ -420,6 +427,7 @@ def analyze_question_with_chart(
                 context=context,
             )
 
+        # Use the job-aware runner so the request can be cancelled and tracked.
         else:
             response = run_controlled_analysis(
                 csv_path,
@@ -429,7 +437,9 @@ def analyze_question_with_chart(
                 context=context,
             )
 
+        # Return an error message immediately instead of formatting a failed analysis result.
         if response.get("error"):
+            # Preserve the expected cancellation message rather than presenting cancellation as a failure.
             if response["error"] == "Analysis stopped.":
                 return "Analysis stopped.", None
 
@@ -438,13 +448,12 @@ def analyze_question_with_chart(
                 None,
             )
 
-        answer = str(
-            response.get("answer") or "No answer returned."
-        )
+        answer = str(response.get("answer") or "No answer returned.")
 
         table = response.get("table")
         figure = None
 
+        # Append formatted supporting data and attempt chart generation only when analysis returned a table.
         if table:
             presentation_timer = DebugTimer("PRESENTATION")
 
@@ -469,14 +478,11 @@ def analyze_question_with_chart(
 
             debug_log(
                 "PRESENTATION",
-                f"Supporting data fields: "
-                f"{list(result_df.columns)}",
+                f"Supporting data fields: " f"{list(result_df.columns)}",
             )
 
             try:
-                formatted_table = (
-                    business_table_to_markdown(result_df)
-                )
+                formatted_table = business_table_to_markdown(result_df)
 
                 answer += "\n\n"
                 answer += formatted_table
@@ -489,14 +495,10 @@ def analyze_question_with_chart(
             except Exception as error:
                 debug_log(
                     "PRESENTATION ERROR",
-                    f"Table formatting failed: "
-                    f"{type(error).__name__}",
+                    f"Table formatting failed: " f"{type(error).__name__}",
                 )
 
-                answer += (
-                    "\n\nSupporting data could not "
-                    "be formatted for display."
-                )
+                answer += "\n\nSupporting data could not " "be formatted for display."
 
             try:
                 debug_log(
@@ -508,35 +510,34 @@ def analyze_question_with_chart(
 
                 debug_log(
                     "CHART",
-                    "Chart generated successfully"
-                    if figure is not None
-                    else "No suitable chart for returned data",
+                    (
+                        "Chart generated successfully"
+                        if figure is not None
+                        else "No suitable chart for returned data"
+                    ),
                 )
 
             except Exception as error:
                 # A chart failure must not discard a valid answer.
                 debug_log(
                     "CHART ERROR",
-                    f"Chart generation failed: "
-                    f"{type(error).__name__}",
+                    f"Chart generation failed: " f"{type(error).__name__}",
                 )
 
                 figure = None
 
-            presentation_timer.finish(
-                "Result presentation completed"
-            )
+            presentation_timer.finish("Result presentation completed")
 
         return answer, figure
 
     except Exception:
         return (
-            "An unexpected analysis error occurred. "
-            "Please try again.",
+            "An unexpected analysis error occurred. " "Please try again.",
             None,
         )
 
 
+# Return the text answer from the chart-aware analysis flow while preserving the text-only callback interface.
 def analyze_question(
     question,
     csv_path,
@@ -554,10 +555,10 @@ def analyze_question(
 
     return answer
 
-# ----------------------------------
-# Chat interface callbacks
-# ----------------------------------
 
+# ----------------------------------
+# Handle chat submissions, cancellation requests, and job cleanup.
+# ----------------------------------
 
 _active_jobs = {}
 _jobs_lock = threading.Lock()
@@ -568,12 +569,15 @@ THINKING_INDICATOR = (
     '<span class="thinking-dot"></span>'
     '<span class="thinking-dot"></span>'
     '<span class="thinking-dot"></span>'
-    '</span>'
+    "</span>"
 )
 
+
+# Add a question and its analysis response to chat history using the conversation's prior context.
 def send_message(question, history, csv_path):
     history = list(history or [])
 
+    # Ignore empty submissions so they do not create blank conversation turns.
     if not question or not question.strip():
         return history, ""
 
@@ -587,13 +591,17 @@ def send_message(question, history, csv_path):
         context=context,
     )
 
-    history.extend([
-        {"role": "user", "content": question},
-        {"role": "assistant", "content": answer},
-    ])
+    history.extend(
+        [
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": answer},
+        ]
+    )
 
     return history, ""
 
+
+# Stream progress for a session-scoped analysis, return its answer and chart, and release job state during cleanup.
 def send_controlled_message(
     question,
     history,
@@ -602,6 +610,7 @@ def send_controlled_message(
 ):
     history = list(history or [])
 
+    # Stop an empty submission and restore the interface without creating an analysis job.
     if not question or not question.strip():
         yield (
             history,
@@ -613,7 +622,7 @@ def send_controlled_message(
 
     question = question.strip()
     session_id = request.session_hash
-    
+
     job = AnalysisJob()
 
     timer = DebugTimer(
@@ -634,6 +643,7 @@ def send_controlled_message(
     )
 
     with _jobs_lock:
+        # Reject a second analysis from the same session while its current job is active.
         if session_id in _active_jobs:
             return
 
@@ -653,7 +663,9 @@ def send_controlled_message(
             flush=True,
         )
 
+        # Inspect each history entry to log structured message details without assuming every entry is a dictionary.
         for message in history:
+            # Log role and content details for structured history messages; report the type of other entries.
             if isinstance(message, dict):
                 print(
                     f"[FRONTEND DEBUG] "
@@ -662,10 +674,10 @@ def send_controlled_message(
                     f"{type(message.get('content')).__name__}",
                     flush=True,
                 )
+            # Log the Python type when a history item is not a structured message dictionary.
             else:
                 print(
-                    f"[FRONTEND DEBUG] Message type: "
-                    f"{type(message).__name__}",
+                    f"[FRONTEND DEBUG] Message type: " f"{type(message).__name__}",
                     flush=True,
                 )
 
@@ -678,18 +690,18 @@ def send_controlled_message(
         )
 
         print(
-            f"[FRONTEND DEBUG] Extracted context: "
-            f"{len(context)} messages",
+            f"[FRONTEND DEBUG] Extracted context: " f"{len(context)} messages",
             flush=True,
         )
 
-        history.append({
-            "role": "user",
-            "content": question,
-        })
+        history.append(
+            {
+                "role": "user",
+                "content": question,
+            }
+        )
 
-        # Display a temporary animated assistant message.
-        # Do not add it to the actual conversation history.
+        # Show a temporary thinking indicator without adding it to the saved conversation history.
         pending_history = list(history) + [
             {
                 "role": "assistant",
@@ -738,6 +750,7 @@ def send_controlled_message(
             flush=True,
         )
 
+        # Replace a cancelled result with the stop message and discard any chart.
         if job.cancelled:
             print(
                 "[FRONTEND DEBUG] Analysis cancelled by user",
@@ -747,26 +760,27 @@ def send_controlled_message(
             answer = "Analysis stopped."
             figure = None
 
-        # Log the final answer.
+        # Record the completed answer under this job ID for debugging.
         debug_log(
             "ANSWER",
             answer,
             job_id=job.job_id,
         )
 
-        # Log chart generation status.
+        # Record whether this analysis produced a chart for the displayed result.
         debug_log(
             "CHART",
-            "Chart generated" if figure is not None
-            else "No chart returned",
+            "Chart generated" if figure is not None else "No chart returned",
             job_id=job.job_id,
         )
 
         # Replace the temporary indicator with the final answer.
-        history.append({
-            "role": "assistant",
-            "content": answer,
-        })
+        history.append(
+            {
+                "role": "assistant",
+                "content": answer,
+            }
+        )
 
         print(
             "[FRONTEND DEBUG] Thinking indicator removed",
@@ -779,8 +793,7 @@ def send_controlled_message(
         )
 
         print(
-            f"[FRONTEND DEBUG] Chart available: "
-            f"{figure is not None}",
+            f"[FRONTEND DEBUG] Chart available: " f"{figure is not None}",
             flush=True,
         )
 
@@ -798,6 +811,7 @@ def send_controlled_message(
         job.cancel()
 
         with _jobs_lock:
+            # Remove the session entry only if it still points to this job.
             if _active_jobs.get(session_id) is job:
                 _active_jobs.pop(session_id, None)
 
@@ -819,12 +833,15 @@ def send_controlled_message(
         ),
     )
 
+
+# Request cancellation of the active analysis associated with the browser session.
 def cancel_active_analysis(request: gr.Request):
     session_id = request.session_hash
 
     with _jobs_lock:
         job = _active_jobs.get(session_id)
 
+        # Send a cancellation signal only when this session has an active analysis job.
         if job is not None:
             debug_log(
                 "CANCEL",
@@ -840,31 +857,39 @@ def cancel_active_analysis(request: gr.Request):
                 job_id=job.job_id,
             )
 
+
+# Cancel frontend jobs and wait for backend analyses to finish their cleanup before application exit.
 def shutdown_application():
-    """Cancel active analyses before exiting."""
 
     print("\n[Shutdown] Stopping active analyses...")
 
     with _jobs_lock:
+        # Signal every active frontend job to cancel before waiting for backend cleanup.
         for job in _active_jobs.values():
             job.cancel()
 
     cleaned = shutdown_analysis_jobs(timeout=60)
 
+    # Report whether all active analyses completed cleanup before shutdown.
     if cleaned:
         print("[Shutdown] Analysis cleanup completed.")
+    # Warn that some analysis jobs did not finish cleanup before shutdown.
     else:
         print("[Shutdown] Some jobs did not finish cleanup.")
 
+
+# Load a dataset and its preview metadata, store the file path, and clear the previous conversation.
 def load_csv_and_reset_chat(file_path):
     preview, status, rows, columns, csv_path = load_csv(file_path)
     return preview, status, rows, columns, csv_path, []
 
 
 # ----------------------------------
-# Build the Gradio interface
+# Construct the dashboard layout and connect its interactive events.
 # ----------------------------------
 
+
+# Hide the Send control, show Stop, and disable inputs while analysis is running.
 def start_processing():
     return (
         gr.update(visible=False),
@@ -875,6 +900,7 @@ def start_processing():
     )
 
 
+# Restore the Send control and re-enable inputs after analysis ends.
 def stop_processing():
     return (
         gr.update(visible=True),
@@ -883,6 +909,7 @@ def stop_processing():
         gr.update(interactive=True),
         gr.update(interactive=True),
     )
+
 
 with gr.Blocks(title="Business Insights | Data Analysis") as demo:
     dataset_state = gr.State(value=None)
@@ -933,9 +960,7 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
             )
             # Conversation label outside the chatbot
             gr.Markdown(
-                '<span class="business-blue-label">'
-                'Analysis Conversation'
-                '</span>',
+                '<span class="business-blue-label">' "Analysis Conversation" "</span>",
                 elem_id="conversation-label",
             )
 
@@ -952,8 +977,8 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
             # Question label outside the input row
             gr.Markdown(
                 '<span class="business-blue-label">'
-                'Ask a Business Question'
-                '</span>',
+                "Ask a Business Question"
+                "</span>",
                 elem_id="question-label",
             )
 
@@ -1083,7 +1108,7 @@ with gr.Blocks(title="Business Insights | Data Analysis") as demo:
         ],
     )
 
-
+# Launch the Gradio interface only when this module is run directly.
 if __name__ == "__main__":
     try:
         demo.queue().launch(

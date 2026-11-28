@@ -6,7 +6,6 @@ import pandas as pd
 from agent.debug_logger import debug_log, DebugTimer
 from agent.result_formatter import escape_text, format_named_value
 
-
 GROUP_ALIASES = {
     "region": "Region",
     "regions": "Region",
@@ -34,8 +33,8 @@ GROUP_PATTERN = "|".join(
 MAX_RESULT_ROWS = 200
 
 
+# Return a readable singular or plural group count.
 def group_count_text(group, count):
-    """Return a readable singular or plural group count."""
 
     names = {
         "Region": ("region", "regions"),
@@ -52,17 +51,19 @@ def group_count_text(group, count):
         ("group", "groups"),
     )
 
+    # Return the selected result when `count == 0`.
     if count == 0:
         return f"No {plural}"
 
+    # Return the selected result when `count == 1`.
     if count == 1:
         return f"1 {singular}"
 
     return f"{count:,} {plural}"
 
 
+# Normalize wording while preserving financial symbols.
 def normalize_financial_question(question):
-    """Normalize wording while preserving financial symbols."""
 
     question = question.lower().strip()
 
@@ -75,8 +76,8 @@ def normalize_financial_question(question):
     return " ".join(question.split())
 
 
+# Recognize supported standalone financial questions.
 def resolve_financial_intent(question):
-    """Recognize supported standalone financial questions."""
 
     q = normalize_financial_question(question)
 
@@ -88,6 +89,7 @@ def resolve_financial_intent(question):
         q,
     )
 
+    # Return the selected result when `match`.
     if match:
         return {
             "kind": "discount_relationship",
@@ -103,6 +105,7 @@ def resolve_financial_intent(question):
         q,
     )
 
+    # Return the selected result when `match`.
     if match:
         return {
             "kind": "average_discount",
@@ -117,6 +120,7 @@ def resolve_financial_intent(question):
         q,
     )
 
+    # Return the selected result when `match`.
     if match:
         return {
             "kind": "above_average_loss",
@@ -132,11 +136,13 @@ def resolve_financial_intent(question):
         q,
     )
 
+    # Update `(group, direction, threshold)` when `match`.
     if match:
         group, direction, threshold = match.groups()
 
         threshold = float(threshold)
 
+        # Return `None` when `not math.isfinite(threshold)`.
         if not math.isfinite(threshold):
             return None
 
@@ -157,13 +163,13 @@ def resolve_financial_intent(question):
         q,
     )
 
+    # Update `(group, metric, direction, threshold)` when `match`.
     if match:
         group, metric, direction, threshold = match.groups()
 
-        threshold = float(
-            threshold.replace("$", "").replace(",", "")
-        )
+        threshold = float(threshold.replace("$", "").replace(",", ""))
 
+        # Return `None` when `not math.isfinite(threshold)`.
         if not math.isfinite(threshold):
             return None
 
@@ -178,8 +184,8 @@ def resolve_financial_intent(question):
     return None
 
 
+# Calculate validated group totals without modifying input.
 def calculate_grouped_metrics(df, group, metrics):
-    """Calculate validated group totals without modifying input."""
 
     timer = DebugTimer("FINANCIAL CALCULATION")
 
@@ -190,11 +196,8 @@ def calculate_grouped_metrics(df, group, metrics):
 
     required = [group, *metrics]
 
-    if (
-        df.empty
-        or not df.columns.is_unique
-        or not set(required).issubset(df.columns)
-    ):
+    # Call `debug_log` when `df.empty or not df.columns.is_unique or (not set(required).issubset(df.columns))`.
+    if df.empty or not df.columns.is_unique or not set(required).issubset(df.columns):
         debug_log(
             "FINANCIAL VALIDATION",
             "Required financial columns unavailable",
@@ -204,6 +207,7 @@ def calculate_grouped_metrics(df, group, metrics):
 
     data = df[required].copy()
 
+    # Call `debug_log` when `data[group].isna().any()`.
     if data[group].isna().any():
         debug_log(
             "FINANCIAL VALIDATION",
@@ -212,10 +216,12 @@ def calculate_grouped_metrics(df, group, metrics):
 
         return None
 
-    if not data[group].map(
-        lambda value: isinstance(value, str)
-        and bool(value.strip())
-    ).all():
+    # Call `debug_log` when `not data[group].map(lambda value: isinstance(value, str) and bool(value.strip())).all()`.
+    if (
+        not data[group]
+        .map(lambda value: isinstance(value, str) and bool(value.strip()))
+        .all()
+    ):
         debug_log(
             "FINANCIAL VALIDATION",
             "Unsupported grouping values",
@@ -223,10 +229,10 @@ def calculate_grouped_metrics(df, group, metrics):
 
         return None
 
+    # Process each `metric` from `metrics`.
     for metric in metrics:
-        if data[metric].map(
-            lambda value: isinstance(value, bool)
-        ).any():
+        # Return `None` when `data[metric].map(lambda value: isinstance(value, bool)).any()`.
+        if data[metric].map(lambda value: isinstance(value, bool)).any():
             return None
 
         data[metric] = pd.to_numeric(
@@ -234,10 +240,8 @@ def calculate_grouped_metrics(df, group, metrics):
             errors="coerce",
         )
 
-        if (
-            data[metric].isna().any()
-            or not data[metric].map(math.isfinite).all()
-        ):
+        # Call `debug_log` when `data[metric].isna().any() or not data[metric].map(math.isfinite).all()`.
+        if data[metric].isna().any() or not data[metric].map(math.isfinite).all():
             debug_log(
                 "FINANCIAL VALIDATION",
                 f"Invalid numeric values in {metric}",
@@ -245,16 +249,15 @@ def calculate_grouped_metrics(df, group, metrics):
 
             return None
 
-    grouped = (
-        data.groupby(group, observed=True)[metrics]
-        .sum()
-        .reset_index()
-    )
+    grouped = data.groupby(group, observed=True)[metrics].sum().reset_index()
 
+    # Return `None` when `grouped.empty`.
     if grouped.empty:
         return None
 
+    # Process each `metric` from `metrics`.
     for metric in metrics:
+        # Return `None` when `not grouped[metric].map(math.isfinite).all()`.
         if not grouped[metric].map(math.isfinite).all():
             return None
 
@@ -263,6 +266,7 @@ def calculate_grouped_metrics(df, group, metrics):
         f"Calculated groups: {len(grouped)}",
     )
 
+    # Process each `row` from `grouped.head(30).to_dict('records')`.
     for row in grouped.head(30).to_dict("records"):
         debug_log(
             "FINANCIAL GROUP",
@@ -274,24 +278,18 @@ def calculate_grouped_metrics(df, group, metrics):
     return grouped
 
 
+# Calculate margins using total profit divided by total sales.
 def calculate_profit_margin(grouped):
-    """Calculate margins using total profit divided by total sales."""
 
     grouped = grouped.copy()
 
-    valid_sales = grouped["Sales"].where(
-        grouped["Sales"] > 0
-    )
+    valid_sales = grouped["Sales"].where(grouped["Sales"] > 0)
 
-    grouped["Profit_Margin_Pct"] = (
-        grouped["Profit"] / valid_sales * 100
-    )
+    grouped["Profit_Margin_Pct"] = grouped["Profit"] / valid_sales * 100
 
-    grouped["Profit_Margin_Pct"] = (
-        grouped["Profit_Margin_Pct"].replace(
-            [float("inf"), float("-inf")],
-            float("nan"),
-        )
+    grouped["Profit_Margin_Pct"] = grouped["Profit_Margin_Pct"].replace(
+        [float("inf"), float("-inf")],
+        float("nan"),
     )
 
     debug_log(
@@ -302,17 +300,18 @@ def calculate_profit_margin(grouped):
     return grouped
 
 
+# Apply a strict upper or lower threshold.
 def threshold_mask(values, direction, threshold):
-    """Apply a strict upper or lower threshold."""
 
+    # Return the selected result when `direction in {'above', 'over'}`.
     if direction in {"above", "over"}:
         return values > threshold
 
     return values < threshold
 
 
+# Return the existing agent response structure.
 def financial_response(answer, rows=None):
-    """Return the existing agent response structure."""
 
     return {
         "answer": answer,
@@ -321,24 +320,30 @@ def financial_response(answer, rows=None):
     }
 
 
+# Convert calculated values into frontend-compatible records.
 def prepare_result_rows(grouped):
-    """Convert calculated values into frontend-compatible records."""
 
     records = []
 
+    # Process each `row` from `grouped.head(MAX_RESULT_ROWS).to_dict('records')`.
     for row in grouped.head(MAX_RESULT_ROWS).to_dict("records"):
         record = {}
 
+        # Process each `(column, value)` from `row.items()`.
         for column, value in row.items():
+            # Update `record[column]` when `pd.isna(value)`.
             if pd.isna(value):
                 record[column] = None
 
+            # Update `record[column]` when `isinstance(value, str)`.
             elif isinstance(value, str):
                 record[column] = value
 
+            # Update `record[column]` when `'correlation' in column.lower()`.
             elif "correlation" in column.lower():
                 record[column] = round(float(value), 4)
 
+            # Update `record[column]` when no earlier condition matches.
             else:
                 record[column] = round(float(value), 2)
 
@@ -352,9 +357,10 @@ def prepare_result_rows(grouped):
     return records
 
 
+# Disclose when supporting results exceed the display limit.
 def append_display_limit(answer, count):
-    """Disclose when supporting results exceed the display limit."""
 
+    # Update `answer` when `count > MAX_RESULT_ROWS`.
     if count > MAX_RESULT_ROWS:
         answer += (
             f"\n\nShowing the first {MAX_RESULT_ROWS:,} "
@@ -364,8 +370,8 @@ def append_display_limit(answer, count):
     return answer
 
 
+# Find groups with above-average total sales and negative profit.
 def above_average_loss_result(df, group):
-    """Find groups with above-average total sales and negative profit."""
 
     grouped = calculate_grouped_metrics(
         df,
@@ -373,11 +379,13 @@ def above_average_loss_result(df, group):
         ["Sales", "Profit"],
     )
 
+    # Return `None` when `grouped is None`.
     if grouped is None:
         return None
 
     average_sales = float(grouped["Sales"].mean())
 
+    # Return `None` when `not math.isfinite(average_sales)`.
     if not math.isfinite(average_sales):
         return None
 
@@ -387,8 +395,7 @@ def above_average_loss_result(df, group):
     )
 
     matches = grouped.loc[
-        (grouped["Sales"] > average_sales)
-        & (grouped["Profit"] < 0)
+        (grouped["Sales"] > average_sales) & (grouped["Profit"] < 0)
     ].copy()
 
     matches = matches.sort_values(
@@ -408,6 +415,7 @@ def above_average_loss_result(df, group):
         average_sales,
     )
 
+    # Return the selected result when `matches.empty`.
     if matches.empty:
         return financial_response(
             "No groups have both above-average total "
@@ -420,10 +428,12 @@ def above_average_loss_result(df, group):
 
     matches["Average_Sales_Threshold"] = average_sales
 
-    matches = matches.rename(columns={
-        "Sales": "Total_Sales",
-        "Profit": "Total_Profit",
-    })
+    matches = matches.rename(
+        columns={
+            "Sales": "Total_Sales",
+            "Profit": "Total_Profit",
+        }
+    )
 
     answer = (
         f"**{group_count_text(group, count)}** "
@@ -432,6 +442,7 @@ def above_average_loss_result(df, group):
         f"**{threshold_text}** and negative total profit."
     )
 
+    # Update `row` when `count == 1`.
     if count == 1:
         row = matches.iloc[0]
 
@@ -446,11 +457,9 @@ def above_average_loss_result(df, group):
             f"{threshold_text}"
         )
 
+        # Update `answer` when `pd.notna(row['Profit_Margin_Pct'])`.
         if pd.notna(row["Profit_Margin_Pct"]):
-            answer += (
-                f"\n- **Profit margin:** "
-                f"{row['Profit_Margin_Pct']:.2f}%"
-            )
+            answer += f"\n- **Profit margin:** " f"{row['Profit_Margin_Pct']:.2f}%"
 
     return financial_response(
         append_display_limit(answer, count),
@@ -458,8 +467,8 @@ def above_average_loss_result(df, group):
     )
 
 
+# Find groups satisfying a profit margin threshold.
 def margin_threshold_result(df, group, direction, threshold):
-    """Find groups satisfying a profit margin threshold."""
 
     grouped = calculate_grouped_metrics(
         df,
@@ -467,14 +476,13 @@ def margin_threshold_result(df, group, direction, threshold):
         ["Sales", "Profit"],
     )
 
+    # Return `None` when `grouped is None`.
     if grouped is None:
         return None
 
     grouped = calculate_profit_margin(grouped)
 
-    unavailable = int(
-        grouped["Profit_Margin_Pct"].isna().sum()
-    )
+    unavailable = int(grouped["Profit_Margin_Pct"].isna().sum())
 
     matches = grouped.loc[
         threshold_mask(
@@ -502,6 +510,7 @@ def margin_threshold_result(df, group, direction, threshold):
         f"{direction} **{threshold:g}%**."
     )
 
+    # Update `row` when `count == 1`.
     if count == 1:
         row = matches.iloc[0]
 
@@ -511,6 +520,7 @@ def margin_threshold_result(df, group, direction, threshold):
             f"which is {direction} **{threshold:g}%**."
         )
 
+    # Update `answer` when `unavailable`.
     if unavailable:
         answer += (
             f"\n\nProfit margins were unavailable for "
@@ -518,10 +528,12 @@ def margin_threshold_result(df, group, direction, threshold):
             "sales or nonfinite calculated margins."
         )
 
-    matches = matches.rename(columns={
-        "Sales": "Total_Sales",
-        "Profit": "Total_Profit",
-    })
+    matches = matches.rename(
+        columns={
+            "Sales": "Total_Sales",
+            "Profit": "Total_Profit",
+        }
+    )
 
     return financial_response(
         append_display_limit(answer, count),
@@ -529,6 +541,7 @@ def margin_threshold_result(df, group, direction, threshold):
     )
 
 
+# Find groups satisfying a monetary threshold.
 def money_threshold_result(
     df,
     group,
@@ -544,6 +557,7 @@ def money_threshold_result(
         [metric],
     )
 
+    # Return `None` when `grouped is None`.
     if grouped is None:
         return None
 
@@ -579,9 +593,11 @@ def money_threshold_result(
         f"**{threshold_text}**."
     )
 
+    # Update `lines` when `count`.
     if count:
         lines = [answer, ""]
 
+        # Process each `(_, row)` from `matches.head(5).iterrows()`.
         for _, row in matches.head(5).iterrows():
             lines.append(
                 f"- **{escape_text(row[group])}:** "
@@ -590,15 +606,17 @@ def money_threshold_result(
 
         answer = "\n".join(lines)
 
+        # Update `answer` when `count > 5`.
         if count > 5:
             answer += (
-                "\n\nAdditional matching groups "
-                "are shown in the supporting data."
+                "\n\nAdditional matching groups " "are shown in the supporting data."
             )
 
-    matches = matches.rename(columns={
-        metric: f"Total_{metric}",
-    })
+    matches = matches.rename(
+        columns={
+            metric: f"Total_{metric}",
+        }
+    )
 
     return financial_response(
         append_display_limit(answer, count),
@@ -606,22 +624,18 @@ def money_threshold_result(
     )
 
 
+# Calculate grouped discounts and optional financial metrics.
 def calculate_discount_metrics(df, group, relationship=False):
-    """Calculate grouped discounts and optional financial metrics."""
 
     timer = DebugTimer("DISCOUNT CALCULATION")
 
     debug_log(
         "DISCOUNT CALCULATION",
-        f"Grouping by: {group} | "
-        f"Relationship analysis: {relationship}",
+        f"Grouping by: {group} | " f"Relationship analysis: {relationship}",
     )
 
-    if (
-        df.empty
-        or not df.columns.is_unique
-        or group not in df.columns
-    ):
+    # Call `debug_log` when `df.empty or not df.columns.is_unique or group not in df.columns`.
+    if df.empty or not df.columns.is_unique or group not in df.columns:
         debug_log(
             "DISCOUNT CALCULATION",
             "Required grouping column unavailable",
@@ -631,10 +645,13 @@ def calculate_discount_metrics(df, group, relationship=False):
 
     labels = df[group]
 
-    if labels.isna().any() or not labels.map(
-        lambda value: isinstance(value, str)
-        and bool(value.strip())
-    ).all():
+    # Call `debug_log` when `labels.isna().any() or not labels.map(lambda value: isinstance(value, str) and...`.
+    if (
+        labels.isna().any()
+        or not labels.map(
+            lambda value: isinstance(value, str) and bool(value.strip())
+        ).all()
+    ):
         debug_log(
             "DISCOUNT CALCULATION",
             "Invalid grouping labels",
@@ -644,30 +661,29 @@ def calculate_discount_metrics(df, group, relationship=False):
 
     validated = validate_discount_values(df)
 
+    # Return `None` when `validated is None`.
     if validated is None:
         return None
 
     discounts, assumption = validated
 
-    data = pd.DataFrame({
-        group: labels,
-        "Average_Discount_Pct": discounts,
-    })
+    data = pd.DataFrame(
+        {
+            group: labels,
+            "Average_Discount_Pct": discounts,
+        }
+    )
 
     averages = (
-        data.groupby(group, observed=True)[
-            "Average_Discount_Pct"
-        ]
-        .mean()
-        .reset_index()
+        data.groupby(group, observed=True)["Average_Discount_Pct"].mean().reset_index()
     )
 
     debug_log(
         "DISCOUNT CALCULATION",
-        f"Average discounts calculated for "
-        f"{len(averages):,} groups",
+        f"Average discounts calculated for " f"{len(averages):,} groups",
     )
 
+    # Call `timer.finish` when `not relationship`.
     if not relationship:
         timer.finish("Average discount calculation completed")
 
@@ -679,6 +695,7 @@ def calculate_discount_metrics(df, group, relationship=False):
         ["Sales", "Profit"],
     )
 
+    # Return `None` when `grouped is None`.
     if grouped is None:
         return None
 
@@ -696,31 +713,28 @@ def calculate_discount_metrics(df, group, relationship=False):
         "Calculating Pearson correlations",
     )
 
+    # Process each `(label, subset)` from `data.groupby(group, observed=True)`.
     for label, subset in data.groupby(
         group,
         observed=True,
     ):
-        paired = subset[
-            ["Average_Discount_Pct", "Profit"]
-        ].dropna()
+        paired = subset[["Average_Discount_Pct", "Profit"]].dropna()
 
         correlation = None
 
+        # Update `calculated` when `len(paired) >= 2 and paired['Average_Discount_Pct'].nunique() > 1 and...`.
         if (
             len(paired) >= 2
             and paired["Average_Discount_Pct"].nunique() > 1
             and paired["Profit"].nunique() > 1
         ):
-            calculated = paired[
-                "Average_Discount_Pct"
-            ].corr(
+            calculated = paired["Average_Discount_Pct"].corr(
                 paired["Profit"],
                 method="pearson",
             )
 
-            if pd.notna(calculated) and math.isfinite(
-                calculated
-            ):
+            # Update `correlation` when `pd.notna(calculated) and math.isfinite(calculated)`.
+            if pd.notna(calculated) and math.isfinite(calculated):
                 correlation = max(
                     -1.0,
                     min(1.0, float(calculated)),
@@ -733,10 +747,12 @@ def calculate_discount_metrics(df, group, relationship=False):
             f"Correlation: {correlation}",
         )
 
-        correlations.append({
-            group: label,
-            "Discount_Profit_Correlation": correlation,
-        })
+        correlations.append(
+            {
+                group: label,
+                "Discount_Profit_Correlation": correlation,
+            }
+        )
 
     grouped = grouped.merge(
         averages,
@@ -752,24 +768,27 @@ def calculate_discount_metrics(df, group, relationship=False):
         validate="one_to_one",
     )
 
-    grouped = grouped.rename(columns={
-        "Sales": "Total_Sales",
-        "Profit": "Total_Profit",
-    })
+    grouped = grouped.rename(
+        columns={
+            "Sales": "Total_Sales",
+            "Profit": "Total_Profit",
+        }
+    )
 
-    grouped = grouped[[
-        group,
-        "Total_Sales",
-        "Total_Profit",
-        "Profit_Margin_Pct",
-        "Average_Discount_Pct",
-        "Discount_Profit_Correlation",
-    ]]
+    grouped = grouped[
+        [
+            group,
+            "Total_Sales",
+            "Total_Profit",
+            "Profit_Margin_Pct",
+            "Average_Discount_Pct",
+            "Discount_Profit_Correlation",
+        ]
+    ]
 
     debug_log(
         "DISCOUNT CALCULATION",
-        f"Completed financial metrics for "
-        f"{len(grouped):,} groups",
+        f"Completed financial metrics for " f"{len(grouped):,} groups",
     )
 
     timer.finish("Discount relationship calculation completed")
@@ -777,8 +796,8 @@ def calculate_discount_metrics(df, group, relationship=False):
     return grouped, assumption
 
 
+# Validate discount values and identify their representation.
 def validate_discount_values(df):
-    """Validate discount values and identify their representation."""
 
     timer = DebugTimer("DISCOUNT VALIDATION")
 
@@ -796,12 +815,9 @@ def validate_discount_values(df):
         "Discount Ratio": "fraction",
     }
 
-    available = [
-        column
-        for column in supported_columns
-        if column in df.columns
-    ]
+    available = [column for column in supported_columns if column in df.columns]
 
+    # Call `debug_log` when `len(available) != 1 or not df.columns.is_unique`.
     if len(available) != 1 or not df.columns.is_unique:
         debug_log(
             "DISCOUNT VALIDATION",
@@ -815,9 +831,8 @@ def validate_discount_values(df):
 
     raw = df[column]
 
-    if raw.map(
-        lambda value: isinstance(value, bool)
-    ).any():
+    # Call `debug_log` when `raw.map(lambda value: isinstance(value, bool)).any()`.
+    if raw.map(lambda value: isinstance(value, bool)).any():
         debug_log(
             "DISCOUNT VALIDATION",
             "Boolean discount values are unsupported",
@@ -832,6 +847,7 @@ def validate_discount_values(df):
 
     invalid = raw.notna() & values.isna()
 
+    # Call `debug_log` when `invalid.any()`.
     if invalid.any():
         debug_log(
             "DISCOUNT VALIDATION",
@@ -842,6 +858,7 @@ def validate_discount_values(df):
 
     valid = values.dropna()
 
+    # Call `debug_log` when `valid.empty`.
     if valid.empty:
         debug_log(
             "DISCOUNT VALIDATION",
@@ -850,6 +867,7 @@ def validate_discount_values(df):
 
         return None
 
+    # Call `debug_log` when `not valid.map(math.isfinite).all()`.
     if not valid.map(math.isfinite).all():
         debug_log(
             "DISCOUNT VALIDATION",
@@ -863,10 +881,10 @@ def validate_discount_values(df):
 
     debug_log(
         "DISCOUNT VALIDATION",
-        f"Column: {column} | Minimum: {minimum} | "
-        f"Maximum: {maximum}",
+        f"Column: {column} | Minimum: {minimum} | " f"Maximum: {maximum}",
     )
 
+    # Call `debug_log` when `minimum < 0 or maximum > 100`.
     if minimum < 0 or maximum > 100:
         debug_log(
             "DISCOUNT VALIDATION",
@@ -877,10 +895,13 @@ def validate_discount_values(df):
 
     assumption = None
 
+    # Evaluate the nested condition when `unit == 'infer'`.
     if unit == "infer":
+        # Update `unit` when `maximum <= 1`.
         if maximum <= 1:
             unit = "fraction"
 
+            # Update `assumption` when `maximum > 0`.
             if maximum > 0:
                 assumption = (
                     "Discount values between 0 and 1 "
@@ -888,6 +909,7 @@ def validate_discount_values(df):
                     "discounts and converted to percentages."
                 )
 
+        # Call `debug_log` when `((valid > 0) & (valid < 1)).any()`.
         elif ((valid > 0) & (valid < 1)).any():
             debug_log(
                 "DISCOUNT VALIDATION",
@@ -896,15 +918,15 @@ def validate_discount_values(df):
 
             return None
 
+        # Update `unit` when no earlier condition matches.
         else:
             unit = "percentage"
 
-            assumption = (
-                "Discount values were interpreted "
-                "as percentage points."
-            )
+            assumption = "Discount values were interpreted " "as percentage points."
 
+    # Evaluate the nested condition when `unit == 'fraction'`.
     if unit == "fraction":
+        # Call `debug_log` when `maximum > 1`.
         if maximum > 1:
             debug_log(
                 "DISCOUNT VALIDATION",
@@ -931,22 +953,18 @@ def validate_discount_values(df):
     return values, assumption
 
 
+# Calculate grouped discounts and optional financial metrics.
 def calculate_discount_metrics(df, group, relationship=False):
-    """Calculate grouped discounts and optional financial metrics."""
 
     timer = DebugTimer("DISCOUNT CALCULATION")
 
     debug_log(
         "DISCOUNT CALCULATION",
-        f"Grouping by: {group} | "
-        f"Relationship analysis: {relationship}",
+        f"Grouping by: {group} | " f"Relationship analysis: {relationship}",
     )
 
-    if (
-        df.empty
-        or not df.columns.is_unique
-        or group not in df.columns
-    ):
+    # Call `debug_log` when `df.empty or not df.columns.is_unique or group not in df.columns`.
+    if df.empty or not df.columns.is_unique or group not in df.columns:
         debug_log(
             "DISCOUNT CALCULATION",
             "Required grouping column unavailable",
@@ -956,10 +974,13 @@ def calculate_discount_metrics(df, group, relationship=False):
 
     labels = df[group]
 
-    if labels.isna().any() or not labels.map(
-        lambda value: isinstance(value, str)
-        and bool(value.strip())
-    ).all():
+    # Call `debug_log` when `labels.isna().any() or not labels.map(lambda value: isinstance(value, str) and...`.
+    if (
+        labels.isna().any()
+        or not labels.map(
+            lambda value: isinstance(value, str) and bool(value.strip())
+        ).all()
+    ):
         debug_log(
             "DISCOUNT CALCULATION",
             "Invalid grouping labels",
@@ -969,30 +990,29 @@ def calculate_discount_metrics(df, group, relationship=False):
 
     validated = validate_discount_values(df)
 
+    # Return `None` when `validated is None`.
     if validated is None:
         return None
 
     discounts, assumption = validated
 
-    data = pd.DataFrame({
-        group: labels,
-        "Average_Discount_Pct": discounts,
-    })
+    data = pd.DataFrame(
+        {
+            group: labels,
+            "Average_Discount_Pct": discounts,
+        }
+    )
 
     averages = (
-        data.groupby(group, observed=True)[
-            "Average_Discount_Pct"
-        ]
-        .mean()
-        .reset_index()
+        data.groupby(group, observed=True)["Average_Discount_Pct"].mean().reset_index()
     )
 
     debug_log(
         "DISCOUNT CALCULATION",
-        f"Average discounts calculated for "
-        f"{len(averages):,} groups",
+        f"Average discounts calculated for " f"{len(averages):,} groups",
     )
 
+    # Call `timer.finish` when `not relationship`.
     if not relationship:
         timer.finish("Average discount calculation completed")
 
@@ -1004,6 +1024,7 @@ def calculate_discount_metrics(df, group, relationship=False):
         ["Sales", "Profit"],
     )
 
+    # Return `None` when `grouped is None`.
     if grouped is None:
         return None
 
@@ -1021,31 +1042,28 @@ def calculate_discount_metrics(df, group, relationship=False):
         "Calculating Pearson correlations",
     )
 
+    # Process each `(label, subset)` from `data.groupby(group, observed=True)`.
     for label, subset in data.groupby(
         group,
         observed=True,
     ):
-        paired = subset[
-            ["Average_Discount_Pct", "Profit"]
-        ].dropna()
+        paired = subset[["Average_Discount_Pct", "Profit"]].dropna()
 
         correlation = None
 
+        # Update `calculated` when `len(paired) >= 2 and paired['Average_Discount_Pct'].nunique() > 1 and...`.
         if (
             len(paired) >= 2
             and paired["Average_Discount_Pct"].nunique() > 1
             and paired["Profit"].nunique() > 1
         ):
-            calculated = paired[
-                "Average_Discount_Pct"
-            ].corr(
+            calculated = paired["Average_Discount_Pct"].corr(
                 paired["Profit"],
                 method="pearson",
             )
 
-            if pd.notna(calculated) and math.isfinite(
-                calculated
-            ):
+            # Update `correlation` when `pd.notna(calculated) and math.isfinite(calculated)`.
+            if pd.notna(calculated) and math.isfinite(calculated):
                 correlation = max(
                     -1.0,
                     min(1.0, float(calculated)),
@@ -1058,10 +1076,12 @@ def calculate_discount_metrics(df, group, relationship=False):
             f"Correlation: {correlation}",
         )
 
-        correlations.append({
-            group: label,
-            "Discount_Profit_Correlation": correlation,
-        })
+        correlations.append(
+            {
+                group: label,
+                "Discount_Profit_Correlation": correlation,
+            }
+        )
 
     grouped = grouped.merge(
         averages,
@@ -1077,24 +1097,27 @@ def calculate_discount_metrics(df, group, relationship=False):
         validate="one_to_one",
     )
 
-    grouped = grouped.rename(columns={
-        "Sales": "Total_Sales",
-        "Profit": "Total_Profit",
-    })
+    grouped = grouped.rename(
+        columns={
+            "Sales": "Total_Sales",
+            "Profit": "Total_Profit",
+        }
+    )
 
-    grouped = grouped[[
-        group,
-        "Total_Sales",
-        "Total_Profit",
-        "Profit_Margin_Pct",
-        "Average_Discount_Pct",
-        "Discount_Profit_Correlation",
-    ]]
+    grouped = grouped[
+        [
+            group,
+            "Total_Sales",
+            "Total_Profit",
+            "Profit_Margin_Pct",
+            "Average_Discount_Pct",
+            "Discount_Profit_Correlation",
+        ]
+    ]
 
     debug_log(
         "DISCOUNT CALCULATION",
-        f"Completed financial metrics for "
-        f"{len(grouped):,} groups",
+        f"Completed financial metrics for " f"{len(grouped):,} groups",
     )
 
     timer.finish("Discount relationship calculation completed")
@@ -1102,8 +1125,8 @@ def calculate_discount_metrics(df, group, relationship=False):
     return grouped, assumption
 
 
+# Return a deterministic discount analysis response.
 def discount_analysis_result(df, group, relationship=False):
-    """Return a deterministic discount analysis response."""
 
     calculated = calculate_discount_metrics(
         df,
@@ -1111,6 +1134,7 @@ def discount_analysis_result(df, group, relationship=False):
         relationship,
     )
 
+    # Return `None` when `calculated is None`.
     if calculated is None:
         return None
 
@@ -1126,53 +1150,39 @@ def discount_analysis_result(df, group, relationship=False):
         "",
     ]
 
+    # Add the extreme-value result to the metric summary when available.
     def append_extreme(column, label, highest=True):
-        available = grouped.loc[
-            grouped[column].notna()
-        ]
+        available = grouped.loc[grouped[column].notna()]
 
+        # Append the value to `lines` when `available.empty`.
         if available.empty:
-            lines.append(
-                f"- **{label}:** Unavailable."
-            )
+            lines.append(f"- **{label}:** Unavailable.")
 
             return
 
-        value = (
-            available[column].max()
-            if highest
-            else available[column].min()
-        )
+        value = available[column].max() if highest else available[column].min()
 
-        matches = available.loc[
-            available[column] == value
-        ]
+        matches = available.loc[available[column] == value]
 
-        names = ", ".join(
-            f"**{escape_text(name)}**"
-            for name in matches[group].head(5)
-        )
+        names = ", ".join(f"**{escape_text(name)}**" for name in matches[group].head(5))
 
+        # Update `names` when `len(matches) > 5`.
         if len(matches) > 5:
-            names += (
-                f" and {len(matches) - 5:,} others"
-            )
+            names += f" and {len(matches) - 5:,} others"
 
         formatted = format_named_value(
             column,
             float(value),
         )
 
-        lines.append(
-            f"- **{label}:** {names} "
-            f"({formatted})."
-        )
+        lines.append(f"- **{label}:** {names} " f"({formatted}).")
 
     append_extreme(
         "Average_Discount_Pct",
         "Highest average discount",
     )
 
+    # Call `append_extreme` when `relationship`.
     if relationship:
         append_extreme(
             "Profit_Margin_Pct",
@@ -1180,17 +1190,17 @@ def discount_analysis_result(df, group, relationship=False):
             highest=False,
         )
 
-        correlations = grouped[
-            "Discount_Profit_Correlation"
-        ].dropna()
+        correlations = grouped["Discount_Profit_Correlation"].dropna()
 
+        # Append the value to `lines` when `correlations.empty`.
         if correlations.empty:
             lines.append(
-                "- **Discount-profit correlation:** "
-                "Unavailable for all groups."
+                "- **Discount-profit correlation:** " "Unavailable for all groups."
             )
 
+        # Evaluate the nested condition when no earlier condition matches.
         else:
+            # Call `append_extreme` when `correlations.min() < 0`.
             if correlations.min() < 0:
                 append_extreme(
                     "Discount_Profit_Correlation",
@@ -1198,17 +1208,18 @@ def discount_analysis_result(df, group, relationship=False):
                     highest=False,
                 )
 
+            # Call `append_extreme` when `correlations.max() > 0`.
             if correlations.max() > 0:
                 append_extreme(
                     "Discount_Profit_Correlation",
                     "Most positive discount-profit correlation",
                 )
 
+            # Append the value to `lines` when `(correlations == 0).all()`.
             if (correlations == 0).all():
-                lines.append(
-                    "\nAll available correlations are zero."
-                )
+                lines.append("\nAll available correlations are zero.")
 
+            # Append the value to `lines` when `(correlations < 0).all()`.
             if (correlations < 0).all():
                 lines.append(
                     "\nAll groups with available correlations "
@@ -1216,12 +1227,9 @@ def discount_analysis_result(df, group, relationship=False):
                     "discount and profit."
                 )
 
-        unavailable = int(
-            grouped[
-                "Discount_Profit_Correlation"
-            ].isna().sum()
-        )
+        unavailable = int(grouped["Discount_Profit_Correlation"].isna().sum())
 
+        # Append the value to `lines` when `unavailable`.
         if unavailable:
             lines.append(
                 f"\nCorrelation was unavailable for "
@@ -1230,11 +1238,9 @@ def discount_analysis_result(df, group, relationship=False):
                 "or undefined calculations."
             )
 
-        lines.append(
-            "\nCorrelation does not "
-            "establish causation."
-        )
+        lines.append("\nCorrelation does not " "establish causation.")
 
+    # Call `append_extreme` when no earlier condition matches.
     else:
         append_extreme(
             "Average_Discount_Pct",
@@ -1242,15 +1248,13 @@ def discount_analysis_result(df, group, relationship=False):
             highest=False,
         )
 
+    # Append the value to `lines` when `assumption`.
     if assumption:
-        lines.append(
-            f"\n{assumption}"
-        )
+        lines.append(f"\n{assumption}")
 
-    missing_discounts = int(
-        grouped["Average_Discount_Pct"].isna().sum()
-    )
+    missing_discounts = int(grouped["Average_Discount_Pct"].isna().sum())
 
+    # Append the value to `lines` when `missing_discounts`.
     if missing_discounts:
         lines.append(
             f"\nAverage discount was unavailable for "
@@ -1273,9 +1277,8 @@ def discount_analysis_result(df, group, relationship=False):
     )
 
 
-
+# Handle supported financial intents or allow AI fallback.
 def try_financial_analysis(df, question):
-    """Handle supported financial intents or allow AI fallback."""
 
     timer = DebugTimer("FINANCIAL")
 
@@ -1286,6 +1289,7 @@ def try_financial_analysis(df, question):
 
     intent = resolve_financial_intent(question)
 
+    # Call `debug_log` when `intent is None`.
     if intent is None:
         debug_log(
             "FINANCIAL",
@@ -1302,6 +1306,7 @@ def try_financial_analysis(df, question):
     group = intent["group"]
     kind = intent["kind"]
 
+    # Update `result` when `kind == 'discount_relationship'`.
     if kind == "discount_relationship":
         result = discount_analysis_result(
             df,
@@ -1309,6 +1314,7 @@ def try_financial_analysis(df, question):
             relationship=True,
         )
 
+    # Update `result` when `kind == 'average_discount'`.
     elif kind == "average_discount":
         result = discount_analysis_result(
             df,
@@ -1316,12 +1322,14 @@ def try_financial_analysis(df, question):
             relationship=False,
         )
 
+    # Update `result` when `kind == 'above_average_loss'`.
     elif kind == "above_average_loss":
         result = above_average_loss_result(
             df,
             group,
         )
 
+    # Update `result` when `kind == 'margin_threshold'`.
     elif kind == "margin_threshold":
         result = margin_threshold_result(
             df,
@@ -1330,6 +1338,7 @@ def try_financial_analysis(df, question):
             intent["threshold"],
         )
 
+    # Update `result` when `kind == 'money_threshold'`.
     elif kind == "money_threshold":
         result = money_threshold_result(
             df,
@@ -1339,18 +1348,19 @@ def try_financial_analysis(df, question):
             intent["threshold"],
         )
 
+    # Return `None` when no earlier condition matches.
     else:
         return None
 
+    # Call `debug_log` when `result is None`.
     if result is None:
         debug_log(
             "FINANCIAL",
             "Financial calculation unavailable; allowing AI fallback",
         )
 
+    # Call `timer.finish` when no earlier condition matches.
     else:
-        timer.finish(
-            "Deterministic financial analysis completed"
-        )
+        timer.finish("Deterministic financial analysis completed")
 
     return result
